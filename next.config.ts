@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'standalone', // Required for Docker deployment
   // Required for FFmpeg.wasm multithreading
   async headers() {
     return [
