@@ -22,8 +22,8 @@ genai.configure(api_key=GOOGLE_API_KEY)
 # Constants
 UPLOAD_DIR = Path("temp_uploads")
 PROCESSED_DIR = Path("temp_processed")
-FRONTEND_URL = "http://localhost:3000"
-BACKEND_URL = "http://localhost:8000"
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 GEMINI_MODEL = "gemini-1.5-flash"  # Fast model for video analysis
 GEMINI_TIMEOUT = 600  # 10 minutes
 VIDEO_PROCESSING_CHECK_INTERVAL = 2  # seconds
