@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, DragEvent } from "react";
+import { useState, useEffect, DragEvent } from "react";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile, toBlobURL } from "@ffmpeg/util";
 import { Upload, FileVideo, Download, Loader2, CheckCircle, Server, Monitor, Sparkles, Tag, X, Image as ImageIcon } from "lucide-react";
@@ -107,7 +107,7 @@ export default function Compressor() {
             } else {
                 await compressOnServer(fileItem);
             }
-        } catch (error) {
+        } catch {
             setFiles(prev => prev.map(f =>
                 f.id === fileItem.id ? { ...f, status: "error" } : f
             ));
@@ -119,6 +119,7 @@ export default function Compressor() {
         const outputName = `smartpress_${fileItem.file.name}`;
         await ffmpegRef.writeFile(fileItem.file.name, await fetchFile(fileItem.file));
         await ffmpegRef.exec(["-i", fileItem.file.name, "-vf", "scale=1280:-1", "-q:v", "15", outputName]);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const data = (await ffmpegRef.readFile(outputName)) as any;
 
         const downloadLink = URL.createObjectURL(new Blob([data.buffer], { type: fileItem.file.type }));
