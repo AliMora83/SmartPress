@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect, DragEvent } from "react";
+import { useState, useEffect, DragEvent } from "react";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile, toBlobURL } from "@ffmpeg/util";
-import { Upload, FileVideo, Download, Loader2, CheckCircle, Server, Monitor, Sparkles, Tag, X, Image as ImageIcon } from "lucide-react";
+import { Upload, FileVideo, Download, Loader2, CheckCircle, Server, Monitor, X, Image as ImageIcon } from "lucide-react";
+import Image from "next/image";
 
 interface FileItem {
     id: string;
@@ -21,7 +22,6 @@ export default function Compressor() {
     const [loaded, setLoaded] = useState(false);
     const [ffmpegRef, setFfmpegRef] = useState<FFmpeg | null>(null);
     const [files, setFiles] = useState<FileItem[]>([]);
-    const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [dragActive, setDragActive] = useState(false);
 
     useEffect(() => {
@@ -107,7 +107,7 @@ export default function Compressor() {
             } else {
                 await compressOnServer(fileItem);
             }
-        } catch (error) {
+        } catch {
             setFiles(prev => prev.map(f =>
                 f.id === fileItem.id ? { ...f, status: "error" } : f
             ));
@@ -185,56 +185,6 @@ export default function Compressor() {
         }
     };
 
-    const runAiAnalysis = async (fileItem: FileItem) => {
-        setIsAnalyzing(true);
-        const formData = new FormData();
-        formData.append("file", fileItem.file);
-
-        // Create an AbortController with a 10-minute timeout for long video processing
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minutes
-
-        try {
-            const response = await fetch("http://localhost:8000/analyze-video", {
-                method: "POST",
-                body: formData,
-                signal: controller.signal
-            });
-
-            clearTimeout(timeoutId);
-
-            // Check if response is ok
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
-                throw new Error(errorData.detail || `Server error: ${response.status}`);
-            }
-
-            const result = await response.json();
-
-            // Validate that we got the expected data
-            if (!result || !result.analysis) {
-                console.error("Invalid response from backend:", result);
-                throw new Error("Backend returned no analysis data. Check backend console for errors.");
-            }
-
-            const parsed = JSON.parse(result.analysis);
-            setFiles(prev => prev.map(f =>
-                f.id === fileItem.id ? { ...f, aiResult: parsed } : f
-            ));
-        } catch (e) {
-            console.error("AI Analysis Error:", e);
-            if (e instanceof Error && e.name === 'AbortError') {
-                alert("AI Analysis timed out (took longer than 10 minutes).\n\nThis can happen with large videos. Try a shorter video or wait for Gemini to process.");
-            } else {
-                const errorMessage = e instanceof Error ? e.message : "Unknown error";
-                alert(`AI Analysis failed: ${errorMessage}\n\nCheck the browser console and backend terminal for details.`);
-            }
-        } finally {
-            clearTimeout(timeoutId);
-            setIsAnalyzing(false);
-        }
-    };
-
     const removeFile = (id: string) => {
         setFiles(prev => prev.filter(f => f.id !== id));
     };
@@ -272,8 +222,6 @@ export default function Compressor() {
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
     };
-
-    const currentVideoFile = files.find(f => f.mode === "server" && f.status === "done");
 
     return (
         <div className={`w-full h-full ${files.length === 0 ? 'min-h-[50vh] md:min-h-screen flex items-center justify-center' : 'py-6 md:p-12'}`}>
@@ -359,9 +307,9 @@ export default function Compressor() {
 
                                     <div className="flex items-start gap-4">
                                         {/* Preview Thumbnail */}
-                                        <div className="flex-shrink-0 w-20 h-20 bg-gray-200 rounded overflow-hidden">
+                                        <div className="flex-shrink-0 w-20 h-20 bg-gray-200 rounded overflow-hidden relative">
                                             {fileItem.preview && fileItem.file.type.startsWith("image") ? (
-                                                <img src={fileItem.preview} alt="" className="w-full h-full object-cover" />
+                                                <Image src={fileItem.preview} alt="" fill className="object-cover" unoptimized />
                                             ) : (
                                                 <div className="w-full h-full flex items-center justify-center">
                                                     {fileItem.file.type.startsWith("video") ? (
@@ -440,61 +388,6 @@ export default function Compressor() {
                     </div>
                 )}
 
-                {/* AI Analysis Panel - Temporarily disabled */}
-                {/* {currentVideoFile && (
-                <div className="bg-purple-50 border border-purple-100 rounded-xl p-6">
-                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2 mb-4">
-                        AI Intelligence <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded-full">Pro</span>
-                    </h2>
-
-                    {!currentVideoFile.aiResult && !isAnalyzing && (
-                        <div className="text-center">
-                            <Sparkles className="mx-auto text-purple-500 mb-3" size={32} />
-                            <p className="text-gray-600 text-sm mb-4">
-                                Use Gemini 1.5 Pro to analyze this video and generate viral metadata.
-                            </p>
-                            <button
-                                onClick={() => runAiAnalysis(currentVideoFile)}
-                                className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 mx-auto"
-                            >
-                                <Sparkles size={16} /> Analyze Video
-                            </button>
-                        </div>
-                    )}
-
-                    {isAnalyzing && (
-                        <div className="text-center py-8">
-                            <Loader2 className="animate-spin text-purple-600 mx-auto mb-2" />
-                            <p className="text-purple-800 text-sm font-medium">Gemini is watching your video...</p>
-                        </div>
-                    )}
-
-                    {currentVideoFile.aiResult && (
-                        <div className="space-y-4">
-                            <div>
-                                <label className="text-xs font-bold text-purple-800 uppercase">Suggested Title</label>
-                                <p className="text-gray-900 font-medium leading-tight">{currentVideoFile.aiResult.title}</p>
-                            </div>
-
-                            <div>
-                                <label className="text-xs font-bold text-purple-800 uppercase">Description</label>
-                                <p className="text-gray-600 text-sm">{currentVideoFile.aiResult.description}</p>
-                            </div>
-
-                            <div>
-                                <label className="text-xs font-bold text-purple-800 uppercase">Tags</label>
-                                <div className="flex flex-wrap gap-2 mt-1">
-                                    {currentVideoFile.aiResult.hashtags.map(tag => (
-                                        <span key={tag} className="flex items-center gap-1 bg-white border border-purple-200 text-purple-600 px-2 py-1 rounded text-xs">
-                                            <Tag size={10} /> {tag}
-                                        </span>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            )} */}
             </div>
         </div>
     );
