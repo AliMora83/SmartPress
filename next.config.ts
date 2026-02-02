@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'standalone', // Required for Docker deployment
+  // Use standalone output for Docker (Cloud Run), but default/undefined for Netlify to let the plugin handle it
+  output: process.env.NETLIFY ? undefined : 'standalone',
   // Required for FFmpeg.wasm multithreading
   async headers() {
     return [
