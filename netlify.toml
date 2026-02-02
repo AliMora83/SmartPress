@@ -1,6 +1,6 @@
 [build]
   command = "npm run build"
-  publish = ".next"
+  # publish = ".next"  <-- Removed per guidelines for @netlify/plugin-nextjs
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
@@ -8,11 +8,7 @@
 [build.environment]
   NODE_VERSION = "18"
 
-# Redirects for Next.js routing
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+# Redirects for Next.js routing -> Removed catch-all redirect to allow Next.js App Router to handle routing
 
 # Headers for security and performance
 [[headers]]

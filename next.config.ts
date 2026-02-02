@@ -1,6 +1,9 @@
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  output: 'standalone', // Required for Docker deployment
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  // Disable standalone output on Netlify to avoid conflicts with @netlify/plugin-nextjs
+  output: process.env.NETLIFY ? undefined : 'standalone',
+
   // Required for FFmpeg.wasm multithreading
   async headers() {
     return [
