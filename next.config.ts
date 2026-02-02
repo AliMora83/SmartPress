@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'standalone', // Required for Docker deployment
+  output: process.env.NETLIFY ? undefined : 'standalone',
   // Required for FFmpeg.wasm multithreading
   async headers() {
     return [
