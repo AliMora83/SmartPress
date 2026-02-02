@@ -77,7 +77,7 @@ def read_root() -> Dict[str, str]:
 
 
 @app.post("/compress-video")
-async def compress_video(file: UploadFile = File(...)) -> Dict[str, Any]:
+def compress_video(file: UploadFile = File(...)) -> Dict[str, Any]:
     """
     Compress a video file using server-side FFmpeg.
     
