@@ -1,18 +1,12 @@
 [build]
   command = "npm run build"
-  publish = ".next"
+  # publish = ".next" # Commented out to let the plugin handle it
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
 [build.environment]
   NODE_VERSION = "20"
-
-# Redirects for Next.js routing
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
 
 # Headers for security and performance
 [[headers]]
