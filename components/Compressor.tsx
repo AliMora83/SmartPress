@@ -440,8 +440,8 @@ export default function Compressor() {
                     </div>
                 )}
 
-                {/* AI Analysis Panel - Temporarily disabled */}
-                {/* {currentVideoFile && (
+                {/* AI Analysis Panel */}
+                {currentVideoFile && (
                 <div className="bg-purple-50 border border-purple-100 rounded-xl p-6">
                     <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2 mb-4">
                         AI Intelligence <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded-full">Pro</span>
@@ -494,7 +494,7 @@ export default function Compressor() {
                         </div>
                     )}
                 </div>
-            )} */}
+            )}
             </div>
         </div>
     );

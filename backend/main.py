@@ -77,7 +77,7 @@ def read_root() -> Dict[str, str]:
 
 
 @app.post("/compress-video")
-async def compress_video(file: UploadFile = File(...)) -> Dict[str, Any]:
+def compress_video(file: UploadFile = File(...)) -> Dict[str, Any]:
     """
     Compress a video file using server-side FFmpeg.
     
@@ -132,7 +132,7 @@ async def compress_video(file: UploadFile = File(...)) -> Dict[str, Any]:
 
 
 @app.post("/analyze-video")
-async def analyze_video(file: UploadFile = File(...)) -> Dict[str, str]:
+def analyze_video(file: UploadFile = File(...)) -> Dict[str, str]:
     """
     Analyze video content using Google Gemini 1.5 Pro AI.
     
