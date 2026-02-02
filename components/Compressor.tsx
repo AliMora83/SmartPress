@@ -119,7 +119,8 @@ export default function Compressor() {
         const outputName = `smartpress_${fileItem.file.name}`;
         await ffmpegRef.writeFile(fileItem.file.name, await fetchFile(fileItem.file));
         await ffmpegRef.exec(["-i", fileItem.file.name, "-vf", "scale=1280:-1", "-q:v", "15", outputName]);
-        const data = (await ffmpegRef.readFile(outputName)) as any;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data = await ffmpegRef.readFile(outputName) as any;
 
         const downloadLink = URL.createObjectURL(new Blob([data.buffer], { type: fileItem.file.type }));
         setFiles(prev => prev.map(f =>
