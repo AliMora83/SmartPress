@@ -121,7 +121,8 @@ export default function Compressor() {
         await ffmpegRef.exec(["-i", fileItem.file.name, "-vf", "scale=1280:-1", "-q:v", "15", outputName]);
         const data = (await ffmpegRef.readFile(outputName)) as Uint8Array;
 
-        const downloadLink = URL.createObjectURL(new Blob([data.buffer], { type: fileItem.file.type }));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const downloadLink = URL.createObjectURL(new Blob([data as any], { type: fileItem.file.type }));
         setFiles(prev => prev.map(f =>
             f.id === fileItem.id ? {
                 ...f,
