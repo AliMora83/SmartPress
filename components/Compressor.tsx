@@ -121,13 +121,15 @@ export default function Compressor() {
         await ffmpegRef.exec(["-i", fileItem.file.name, "-vf", "scale=1280:-1", "-q:v", "15", outputName]);
         const data = await ffmpegRef.readFile(outputName);
 
-        const downloadLink = URL.createObjectURL(new Blob([(data as Uint8Array).buffer], { type: fileItem.file.type }));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const downloadLink = URL.createObjectURL(new Blob([data as any], { type: fileItem.file.type }));
         setFiles(prev => prev.map(f =>
             f.id === fileItem.id ? {
                 ...f,
                 status: "done",
                 progress: 100,
-                metrics: { originalSize: fileItem.file.size, newSize: data.buffer.byteLength },
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                metrics: { originalSize: fileItem.file.size, newSize: (data as any).byteLength },
                 downloadLink,
             } : f
         ));
