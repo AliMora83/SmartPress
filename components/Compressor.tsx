@@ -3,7 +3,8 @@
 import { useState, useRef, useEffect, DragEvent } from "react";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile, toBlobURL } from "@ffmpeg/util";
-import { Upload, FileVideo, Download, Loader2, CheckCircle, Server, Monitor, Sparkles, Tag, X, Image as ImageIcon } from "lucide-react";
+import { Upload, FileVideo, Download, Loader2, CheckCircle, Server, Monitor, X, Image as ImageIcon } from "lucide-react";
+import Image from "next/image";
 
 interface FileItem {
     id: string;
@@ -22,7 +23,6 @@ export default function Compressor() {
     const [ffmpegRef, setFfmpegRef] = useState<FFmpeg | null>(null);
     const [files, setFiles] = useState<FileItem[]>([]);
     const filesRef = useRef(files);
-    const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [dragActive, setDragActive] = useState(false);
 
     useEffect(() => {
@@ -118,7 +118,7 @@ export default function Compressor() {
             } else {
                 await compressOnServer(fileItem);
             }
-        } catch (error) {
+        } catch {
             setFiles(prev => prev.map(f =>
                 f.id === fileItem.id ? { ...f, status: "error" } : f
             ));
@@ -197,55 +197,6 @@ export default function Compressor() {
         }
     };
 
-    const runAiAnalysis = async (fileItem: FileItem) => {
-        setIsAnalyzing(true);
-        const formData = new FormData();
-        formData.append("file", fileItem.file);
-
-        // Create an AbortController with a 10-minute timeout for long video processing
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minutes
-
-        try {
-            const response = await fetch("http://localhost:8000/analyze-video", {
-                method: "POST",
-                body: formData,
-                signal: controller.signal
-            });
-
-            clearTimeout(timeoutId);
-
-            // Check if response is ok
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
-                throw new Error(errorData.detail || `Server error: ${response.status}`);
-            }
-
-            const result = await response.json();
-
-            // Validate that we got the expected data
-            if (!result || !result.analysis) {
-                console.error("Invalid response from backend:", result);
-                throw new Error("Backend returned no analysis data. Check backend console for errors.");
-            }
-
-            const parsed = JSON.parse(result.analysis);
-            setFiles(prev => prev.map(f =>
-                f.id === fileItem.id ? { ...f, aiResult: parsed } : f
-            ));
-        } catch (e) {
-            console.error("AI Analysis Error:", e);
-            if (e instanceof Error && e.name === 'AbortError') {
-                alert("AI Analysis timed out (took longer than 10 minutes).\n\nThis can happen with large videos. Try a shorter video or wait for Gemini to process.");
-            } else {
-                const errorMessage = e instanceof Error ? e.message : "Unknown error";
-                alert(`AI Analysis failed: ${errorMessage}\n\nCheck the browser console and backend terminal for details.`);
-            }
-        } finally {
-            clearTimeout(timeoutId);
-            setIsAnalyzing(false);
-        }
-    };
 
     const removeFile = (id: string) => {
         const file = files.find(f => f.id === id);
@@ -294,7 +245,7 @@ export default function Compressor() {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
     };
 
-    const currentVideoFile = files.find(f => f.mode === "server" && f.status === "done");
+    // const currentVideoFile = files.find(f => f.mode === "server" && f.status === "done");
 
     return (
         <div className={`w-full h-full ${files.length === 0 ? 'min-h-[50vh] md:min-h-screen flex items-center justify-center' : 'py-6 md:p-12'}`}>
@@ -380,9 +331,15 @@ export default function Compressor() {
 
                                     <div className="flex items-start gap-4">
                                         {/* Preview Thumbnail */}
-                                        <div className="flex-shrink-0 w-20 h-20 bg-gray-200 rounded overflow-hidden">
+                                        <div className="flex-shrink-0 w-20 h-20 bg-gray-200 rounded overflow-hidden relative">
                                             {fileItem.preview && fileItem.file.type.startsWith("image") ? (
-                                                <img src={fileItem.preview} alt="" className="w-full h-full object-cover" />
+                                                <Image
+                                                    src={fileItem.preview}
+                                                    alt={fileItem.file.name}
+                                                    fill
+                                                    className="object-cover"
+                                                    unoptimized
+                                                />
                                             ) : (
                                                 <div className="w-full h-full flex items-center justify-center">
                                                     {fileItem.file.type.startsWith("video") ? (
