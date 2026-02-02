@@ -23,6 +23,19 @@ export default function Compressor() {
     const [files, setFiles] = useState<FileItem[]>([]);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [dragActive, setDragActive] = useState(false);
+    const filesRef = useRef(files);
+
+    useEffect(() => {
+        filesRef.current = files;
+    }, [files]);
+
+    useEffect(() => {
+        return () => {
+            filesRef.current.forEach(f => {
+                if (f.preview) URL.revokeObjectURL(f.preview);
+            });
+        };
+    }, []);
 
     useEffect(() => {
         const load = async () => {
@@ -52,12 +65,8 @@ export default function Compressor() {
         load();
     }, []);
 
-    const generatePreview = async (file: File): Promise<string> => {
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target?.result as string);
-            reader.readAsDataURL(file);
-        });
+    const generatePreview = (file: File): string => {
+        return URL.createObjectURL(file);
     };
 
     const handleFileSelect = async (uploadedFiles: FileList | null) => {
@@ -66,7 +75,7 @@ export default function Compressor() {
         const newFiles: FileItem[] = [];
         for (let i = 0; i < uploadedFiles.length; i++) {
             const file = uploadedFiles[i];
-            const preview = await generatePreview(file);
+            const preview = generatePreview(file);
             newFiles.push({
                 id: `${Date.now()}-${i}`,
                 file,
@@ -236,11 +245,22 @@ export default function Compressor() {
     };
 
     const removeFile = (id: string) => {
-        setFiles(prev => prev.filter(f => f.id !== id));
+        setFiles(prev => {
+            const fileToRemove = prev.find(f => f.id === id);
+            if (fileToRemove?.preview) {
+                URL.revokeObjectURL(fileToRemove.preview);
+            }
+            return prev.filter(f => f.id !== id);
+        });
     };
 
     const clearAll = () => {
-        setFiles([]);
+        setFiles(prev => {
+            prev.forEach(f => {
+                if (f.preview) URL.revokeObjectURL(f.preview);
+            });
+            return [];
+        });
     };
 
     const compressAll = async () => {
