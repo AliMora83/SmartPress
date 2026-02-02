@@ -1,4 +1,5 @@
 import os
+import asyncio
 import time
 import shutil
 import ffmpeg
@@ -109,7 +110,7 @@ async def compress_video(file: UploadFile = File(...)) -> Dict[str, Any]:
             preset=FFMPEG_PRESET, 
             acodec=FFMPEG_AUDIO_CODEC
         )
-        ffmpeg.run(stream, overwrite_output=True, quiet=True)
+        await asyncio.to_thread(ffmpeg.run, stream, overwrite_output=True, quiet=True)
 
         new_size = os.path.getsize(output_path)
         reduction_percent = ((original_size - new_size) / original_size) * 100
