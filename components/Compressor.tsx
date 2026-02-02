@@ -119,9 +119,9 @@ export default function Compressor() {
         const outputName = `smartpress_${fileItem.file.name}`;
         await ffmpegRef.writeFile(fileItem.file.name, await fetchFile(fileItem.file));
         await ffmpegRef.exec(["-i", fileItem.file.name, "-vf", "scale=1280:-1", "-q:v", "15", outputName]);
-        const data = (await ffmpegRef.readFile(outputName)) as any;
+        const data = await ffmpegRef.readFile(outputName);
 
-        const downloadLink = URL.createObjectURL(new Blob([data.buffer], { type: fileItem.file.type }));
+        const downloadLink = URL.createObjectURL(new Blob([(data as Uint8Array).buffer], { type: fileItem.file.type }));
         setFiles(prev => prev.map(f =>
             f.id === fileItem.id ? {
                 ...f,
@@ -245,9 +245,21 @@ export default function Compressor() {
 
     const compressAll = async () => {
         const pendingFiles = files.filter(f => f.status === "pending");
-        for (const fileItem of pendingFiles) {
-            await compressFile(fileItem);
-        }
+
+        const serverFiles = pendingFiles.filter(f => f.mode === "server");
+        const clientFiles = pendingFiles.filter(f => f.mode === "client");
+
+        // Process server files concurrently
+        const serverPromise = Promise.all(serverFiles.map(f => compressFile(f)));
+
+        // Process client files sequentially to avoid ffmpeg instance conflicts
+        const clientPromise = (async () => {
+            for (const f of clientFiles) {
+                await compressFile(f);
+            }
+        })();
+
+        await Promise.all([serverPromise, clientPromise]);
     };
 
     const downloadAll = () => {
