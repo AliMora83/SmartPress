@@ -1,5 +1,6 @@
 import os
 import time
+import asyncio
 import shutil
 import ffmpeg
 import google.generativeai as genai
@@ -161,7 +162,7 @@ async def analyze_video(file: UploadFile = File(...)) -> Dict[str, str]:
         wait_time = 0
         while video_file.state.name == "PROCESSING":
             print(f"Gemini is processing video... ({wait_time}s elapsed)")
-            time.sleep(VIDEO_PROCESSING_CHECK_INTERVAL)
+            await asyncio.sleep(VIDEO_PROCESSING_CHECK_INTERVAL)
             wait_time += VIDEO_PROCESSING_CHECK_INTERVAL
             video_file = genai.get_file(video_file.name)
 
