@@ -66,7 +66,9 @@ export default function Compressor() {
         const newFiles: FileItem[] = [];
         for (let i = 0; i < uploadedFiles.length; i++) {
             const file = uploadedFiles[i];
-            const preview = await generatePreview(file);
+            const preview = file.type.startsWith("video")
+                ? undefined
+                : await generatePreview(file);
             newFiles.push({
                 id: `${Date.now()}-${i}`,
                 file,
