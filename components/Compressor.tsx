@@ -21,8 +21,23 @@ export default function Compressor() {
     const [loaded, setLoaded] = useState(false);
     const [ffmpegRef, setFfmpegRef] = useState<FFmpeg | null>(null);
     const [files, setFiles] = useState<FileItem[]>([]);
+    const filesRef = useRef(files);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [dragActive, setDragActive] = useState(false);
+
+    useEffect(() => {
+        filesRef.current = files;
+    }, [files]);
+
+    useEffect(() => {
+        return () => {
+            filesRef.current.forEach(f => {
+                if (f.preview && f.preview.startsWith('blob:')) {
+                    URL.revokeObjectURL(f.preview);
+                }
+            });
+        };
+    }, []);
 
     useEffect(() => {
         const load = async () => {
@@ -52,12 +67,8 @@ export default function Compressor() {
         load();
     }, []);
 
-    const generatePreview = async (file: File): Promise<string> => {
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target?.result as string);
-            reader.readAsDataURL(file);
-        });
+    const generatePreview = (file: File): string => {
+        return URL.createObjectURL(file);
     };
 
     const handleFileSelect = async (uploadedFiles: FileList | null) => {
@@ -66,7 +77,7 @@ export default function Compressor() {
         const newFiles: FileItem[] = [];
         for (let i = 0; i < uploadedFiles.length; i++) {
             const file = uploadedFiles[i];
-            const preview = await generatePreview(file);
+            const preview = generatePreview(file);
             newFiles.push({
                 id: `${Date.now()}-${i}`,
                 file,
@@ -119,6 +130,7 @@ export default function Compressor() {
         const outputName = `smartpress_${fileItem.file.name}`;
         await ffmpegRef.writeFile(fileItem.file.name, await fetchFile(fileItem.file));
         await ffmpegRef.exec(["-i", fileItem.file.name, "-vf", "scale=1280:-1", "-q:v", "15", outputName]);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const data = (await ffmpegRef.readFile(outputName)) as any;
 
         const downloadLink = URL.createObjectURL(new Blob([data.buffer], { type: fileItem.file.type }));
@@ -236,10 +248,19 @@ export default function Compressor() {
     };
 
     const removeFile = (id: string) => {
+        const file = files.find(f => f.id === id);
+        if (file?.preview?.startsWith('blob:')) {
+            URL.revokeObjectURL(file.preview);
+        }
         setFiles(prev => prev.filter(f => f.id !== id));
     };
 
     const clearAll = () => {
+        files.forEach(f => {
+            if (f.preview?.startsWith('blob:')) {
+                URL.revokeObjectURL(f.preview);
+            }
+        });
         setFiles([]);
     };
 
