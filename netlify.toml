@@ -1,18 +1,12 @@
 [build]
   command = "npm run build"
-  publish = ".next"
+  # publish directory is handled automatically by @netlify/plugin-nextjs
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
 [build.environment]
   NODE_VERSION = "18"
-
-# Redirects for Next.js routing
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
 
 # Headers for security and performance
 [[headers]]
@@ -22,6 +16,9 @@
     X-XSS-Protection = "1; mode=block"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
+    # Required for FFmpeg.wasm (SharedArrayBuffer)
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Embedder-Policy = "require-corp"
 
 [[headers]]
   for = "/Smart_Bot.png"
