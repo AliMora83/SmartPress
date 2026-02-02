@@ -1,6 +1,6 @@
 import os
 import time
-import shutil
+import aiofiles
 import ffmpeg
 import google.generativeai as genai
 from fastapi import FastAPI, UploadFile, File, HTTPException
@@ -93,8 +93,9 @@ async def compress_video(file: UploadFile = File(...)) -> Dict[str, Any]:
     
     try:
         # Save uploaded file
-        with open(input_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        async with aiofiles.open(input_path, "wb") as buffer:
+            while content := await file.read(1024 * 1024):  # 1MB chunks
+                await buffer.write(content)
         
         original_size = os.path.getsize(input_path)
         print(f"Processing: {file.filename} ({format_file_size(original_size)})")
@@ -147,8 +148,9 @@ async def analyze_video(file: UploadFile = File(...)) -> Dict[str, str]:
     
     try:
         # Save uploaded file
-        with open(temp_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        async with aiofiles.open(temp_path, "wb") as buffer:
+            while content := await file.read(1024 * 1024):  # 1MB chunks
+                await buffer.write(content)
         
         file_size_mb = temp_path.stat().st_size / (1024 * 1024)
         print(f"AI Analysis requested: {file.filename} ({file_size_mb:.2f} MB)")
