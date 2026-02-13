@@ -161,7 +161,12 @@ export default function Compressor() {
         const data = await ffmpegRef.readFile(outputName);
         const uint8Array = data as Uint8Array;
 
-        const downloadLink = URL.createObjectURL(new Blob([uint8Array.buffer], { type: fileItem.file.type }));
+        // Ensure we handle ArrayBufferLike correctly for the Blob constructor
+        const buffer = uint8Array.buffer instanceof SharedArrayBuffer 
+            ? uint8Array.buffer.slice(0) 
+            : uint8Array.buffer;
+
+        const downloadLink = URL.createObjectURL(new Blob([buffer], { type: fileItem.file.type }));
         setFiles(prev => prev.map(f =>
             f.id === fileItem.id ? {
                 ...f,
