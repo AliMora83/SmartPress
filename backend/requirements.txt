@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+python-multipart
+ffmpeg-python
+google-cloud-aiplatform
+python-dotenv
+google-generativeai
