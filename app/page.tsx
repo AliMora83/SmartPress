@@ -32,6 +32,13 @@ export default function Home() {
           >
             Fast, smart compression for <br className="md:hidden" /> <span className="font-bold">images and video.</span>
           </p>
+
+          {/* Version Number */}
+          <div className="pt-2">
+            <span className="text-[10px] md:text-xs font-bold text-slate-400 tracking-widest uppercase" style={{ fontFamily: 'var(--font-montserrat)' }}>
+              Version 1.0.1
+            </span>
+          </div>
         </div>
       </div>
 
