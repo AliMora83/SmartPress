@@ -158,9 +158,10 @@ export default function Compressor() {
         // Use user-defined image quality
         await ffmpegRef.exec(["-i", fileItem.file.name, "-vf", "scale=1280:-1", "-q:v", imageQuality.toString(), outputName]);
         
-        const data = (await ffmpegRef.readFile(outputName)) as any;
+        const data = await ffmpegRef.readFile(outputName);
+        const uint8Array = data as Uint8Array;
 
-        const downloadLink = URL.createObjectURL(new Blob([data.buffer], { type: fileItem.file.type }));
+        const downloadLink = URL.createObjectURL(new Blob([uint8Array.buffer], { type: fileItem.file.type }));
         setFiles(prev => prev.map(f =>
             f.id === fileItem.id ? {
                 ...f,
@@ -250,7 +251,7 @@ export default function Compressor() {
                 throw new Error("Backend returned no analysis data.");
             }
 
-            let analysisText = result.analysis;
+            const analysisText = result.analysis;
             const jsonMatch = analysisText.match(/\{[\s\S]*\}/);
             const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(analysisText);
             
