@@ -160,7 +160,7 @@ export default function Compressor() {
         
         const data = await ffmpegRef.readFile(outputName);
         /* eslint-disable @typescript-eslint/no-explicit-any */
-        const buffer = (data as any).buffer;
+        const buffer = data;
 
         const downloadLink = URL.createObjectURL(new Blob([buffer], { type: fileItem.file.type }));
         setFiles(prev => prev.map(f =>
@@ -168,7 +168,7 @@ export default function Compressor() {
                 ...f,
                 status: "done",
                 progress: 100,
-                metrics: { originalSize: fileItem.file.size, newSize: data.buffer.byteLength },
+                metrics: { originalSize: fileItem.file.size, newSize: (data as any).length || 0 },
                 downloadLink,
             } : f
         ));
