@@ -13,7 +13,7 @@ interface FileItem {
     mode: "client" | "server";
     progress: number;
     preview?: string;
-    metrics?: { originalSize: number; newSize: number };
+    // metrics removed
     downloadLink?: string;
     aiResult?: { title: string; description: string; hashtags: string[] };
 }
@@ -168,7 +168,6 @@ export default function Compressor() {
                 ...f,
                 status: "done",
                 progress: 100,
-                metrics: { originalSize: fileItem.file.size, newSize: (data as any).length || 0 },
                 downloadLink,
             } : f
         ));
@@ -211,7 +210,6 @@ export default function Compressor() {
                     ...f,
                     status: "done",
                     progress: 100,
-                    metrics: { originalSize: result.original_size, newSize: result.new_size },
                     downloadLink: result.download_url,
                 } : f
             ));
@@ -473,10 +471,6 @@ export default function Compressor() {
                                                 </div>
                                             )}
 
-                                            {fileItem.status === "done" && fileItem.metrics && (
-                                                <div className="flex items-center gap-3 mb-2">
-                                                    <CheckCircle size={16} className="text-green-600" />
-                                                    <span className="text-sm text-gray-500 line-through">{formatBytes(fileItem.metrics.originalSize)}</span>
                                                     <span className="text-sm">→</span>
                                                     <span className="text-sm font-bold text-green-700">{formatBytes(fileItem.metrics.newSize)}</span>
                                                     <span className="text-xs font-bold bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
