@@ -1,9 +1,10 @@
+
 "use client";
 
 import { useState, useRef, useEffect, DragEvent } from "react";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile, toBlobURL } from "@ffmpeg/util";
-import { Upload, FileVideo, Download, Loader2, CheckCircle, Server, Monitor, Sparkles, Tag, X, Image as ImageIcon, Settings2 } from "lucide-react";
+import { Upload, FileVideo, Download, Loader2, CheckCircle, Server, Monitor, X, Image as ImageIcon, Settings2 } from "lucide-react";
 import { get, set } from "idb-keyval";
 
 interface FileItem {
@@ -13,18 +14,18 @@ interface FileItem {
     mode: "client" | "server";
     progress: number;
     preview?: string;
-    // metrics removed
     downloadLink?: string;
-    aiResult?: { title: string; description: string; hashtags: string[] };
+    errorMessage?: string; // Added for enhanced error handling
+    originalSize?: number; // Added for displaying compression metrics
+    newSize?: number; // Added for displaying compression metrics
 }
 
 export default function Compressor() {
     const [loaded, setLoaded] = useState(false);
     const [ffmpegRef, setFfmpegRef] = useState<FFmpeg | null>(null);
     const [files, setFiles] = useState<FileItem[]>([]);
-    const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [dragActive, setDragActive] = useState(false);
-    
+
     // Quality Settings
     const [videoCrf, setVideoCrf] = useState(28);
     const [imageQuality, setImageQuality] = useState(15);
@@ -134,7 +135,7 @@ export default function Compressor() {
 
     const compressFile = async (fileItem: FileItem) => {
         setFiles(prev => prev.map(f =>
-            f.id === fileItem.id ? { ...f, status: "compressing", progress: 0 } : f
+            f.id === fileItem.id ? { ...f, status: "compressing", progress: 0, errorMessage: undefined } : f
         ));
 
         try {
@@ -144,8 +145,10 @@ export default function Compressor() {
                 await compressOnServer(fileItem);
             }
         } catch (error) {
+            // Error handling is now more specific within compressOnServer
+            console.error("Compression initiation error:", error);
             setFiles(prev => prev.map(f =>
-                f.id === fileItem.id ? { ...f, status: "error" } : f
+                f.id === fileItem.id ? { ...f, status: "error", errorMessage: (error instanceof Error ? error.message : 'An unexpected error occurred.') } : f
             ));
         }
     };
@@ -154,10 +157,10 @@ export default function Compressor() {
         if (!ffmpegRef) return;
         const outputName = `smartpress_${fileItem.file.name}`;
         await ffmpegRef.writeFile(fileItem.file.name, await fetchFile(fileItem.file));
-        
+
         // Use user-defined image quality
         await ffmpegRef.exec(["-i", fileItem.file.name, "-vf", "scale=1280:-1", "-q:v", imageQuality.toString(), outputName]);
-        
+
         const data = await ffmpegRef.readFile(outputName);
         /* eslint-disable @typescript-eslint/no-explicit-any */
         const buffer = data;
@@ -169,6 +172,8 @@ export default function Compressor() {
                 status: "done",
                 progress: 100,
                 downloadLink,
+                originalSize: fileItem.file.size, // For client-side, original size is known
+                newSize: buffer.byteLength, // New size is the buffer length
             } : f
         ));
     };
@@ -211,58 +216,35 @@ export default function Compressor() {
                     status: "done",
                     progress: 100,
                     downloadLink: result.download_url,
+                    originalSize: result.original_size, // From backend
+                    newSize: result.new_size, // From backend
                 } : f
             ));
-        } catch (e) {
+        } catch (e: any) {
             clearInterval(progressInterval);
             console.error("Video compression error:", e);
-            setFiles(prev => prev.map(f =>
-                f.id === fileItem.id ? { ...f, status: "error" } : f
-            ));
-        }
-    };
+            let errorMessage = "An unexpected error occurred.";
 
-    const runAiAnalysis = async (fileItem: FileItem) => {
-        setIsAnalyzing(true);
-        const formData = new FormData();
-        formData.append("file", fileItem.file);
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 600000);
-
-        try {
-            const response = await fetch(`${API_URL}/analyze-video`, {
-                method: "POST",
-                body: formData,
-                signal: controller.signal
-            });
-
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
-                throw new Error(errorData.detail || `Server error: ${response.status}`);
+            if (e instanceof Error) {
+                try {
+                    // Attempt to parse backend HTTPException detail
+                    const errorData = JSON.parse(e.message);
+                    if (errorData && typeof errorData === 'object' && errorData.detail) {
+                        errorMessage = errorData.detail;
+                    } else {
+                        errorMessage = e.message;
+                    }
+                } catch (parseError) {
+                    // If not JSON, use the raw error message
+                    errorMessage = e.message;
+                }
+            } else if (typeof e === 'string') {
+                errorMessage = e;
             }
 
-            const result = await response.json();
-
-            if (!result || !result.analysis) {
-                throw new Error("Backend returned no analysis data.");
-            }
-
-            const analysisText = result.analysis;
-            const jsonMatch = analysisText.match(/\{[\s\S]*\}/);
-            const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(analysisText);
-            
             setFiles(prev => prev.map(f =>
-                f.id === fileItem.id ? { ...f, aiResult: parsed } : f
+                f.id === fileItem.id ? { ...f, status: "error", errorMessage } : f
             ));
-        } catch (e) {
-            console.error("AI Analysis Error:", e);
-            alert("AI Analysis failed. Check console for details.");
-        } finally {
-            clearTimeout(timeoutId);
-            setIsAnalyzing(false);
         }
     };
 
@@ -303,8 +285,6 @@ export default function Compressor() {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
     };
 
-    const currentVideoFile = files.find(f => f.mode === "server" && f.status === "done");
-
     return (
         <div className={`w-full h-full ${files.length === 0 ? 'min-h-[50vh] md:min-h-screen flex items-center justify-center' : 'py-6 md:p-12'}`}>
             <div className="w-full max-w-4xl mx-auto space-y-6">
@@ -340,7 +320,7 @@ export default function Compressor() {
 
                         {/* Settings Toggle */}
                         <div className="flex justify-end">
-                            <button 
+                            <button
                                 onClick={() => setShowSettings(!showSettings)}
                                 className="flex items-center gap-2 text-sm text-gray-500 hover:text-blue-600 transition font-medium"
                             >
@@ -356,8 +336,8 @@ export default function Compressor() {
                                         <label className="text-sm font-bold text-gray-700">Video Quality (CRF)</label>
                                         <span className="text-xs font-mono bg-white px-2 py-1 rounded border">{videoCrf}</span>
                                     </div>
-                                    <input 
-                                        type="range" min="18" max="35" step="1" 
+                                    <input
+                                        type="range" min="18" max="35" step="1"
                                         value={videoCrf} onChange={(e) => setVideoCrf(parseInt(e.target.value))}
                                         className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                                     />
@@ -372,8 +352,8 @@ export default function Compressor() {
                                         <label className="text-sm font-bold text-gray-700">Image Quality</label>
                                         <span className="text-xs font-mono bg-white px-2 py-1 rounded border">{imageQuality}</span>
                                     </div>
-                                    <input 
-                                        type="range" min="1" max="31" step="1" 
+                                    <input
+                                        type="range" min="1" max="31" step="1"
                                         value={imageQuality} onChange={(e) => setImageQuality(parseInt(e.target.value))}
                                         className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                                     />
@@ -471,10 +451,20 @@ export default function Compressor() {
                                                 </div>
                                             )}
 
+                                            {fileItem.status === "error" && fileItem.errorMessage && (
+                                                <div className="bg-red-50 text-red-700 text-xs px-3 py-1.5 rounded-md font-medium mt-2">
+                                                    Error: {fileItem.errorMessage}
+                                                </div>
+                                            )}
+
+                                            {fileItem.status === "done" && fileItem.originalSize && fileItem.newSize && (
+                                                <div className="flex items-center gap-2 mt-2 text-gray-500">
+                                                    <CheckCircle size={14} className="text-green-500" />
+                                                    <span className="text-sm">Compressed</span>
                                                     <span className="text-sm">→</span>
-                                                    <span className="text-sm font-bold text-green-700">{formatBytes(fileItem.metrics.newSize)}</span>
+                                                    <span className="text-sm font-bold text-green-700">{formatBytes(fileItem.newSize)}</span>
                                                     <span className="text-xs font-bold bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
-                                                        -{Math.round((1 - fileItem.metrics.newSize / fileItem.metrics.originalSize) * 100)}%
+                                                        -{Math.round((1 - fileItem.newSize / fileItem.originalSize) * 100)}%
                                                     </span>
                                                 </div>
                                             )}
@@ -505,63 +495,8 @@ export default function Compressor() {
                         </div>
                     </div>
                 )}
-
-                {/* AI Analysis Panel */}
-                {currentVideoFile && (
-                    <div className="bg-purple-50 border border-purple-100 rounded-xl p-6 shadow-sm">
-                        <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2 mb-4">
-                            AI Intelligence <span className="bg-purple-600 text-white text-[10px] px-2 py-0.5 rounded uppercase tracking-widest">Pro</span>
-                        </h2>
-
-                        {!currentVideoFile.aiResult && !isAnalyzing && (
-                            <div className="text-center py-4">
-                                <Sparkles className="mx-auto text-purple-500 mb-3" size={32} />
-                                <p className="text-gray-600 text-sm mb-4 font-medium">
-                                    Let the Smart-Bot analyze your video for viral potential.
-                                </p>
-                                <button
-                                    onClick={() => runAiAnalysis(currentVideoFile)}
-                                    className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2.5 rounded-lg text-sm font-bold transition flex items-center gap-2 mx-auto uppercase tracking-wider shadow-md"
-                                >
-                                    <Sparkles size={16} /> Analyze Video
-                                </button>
-                            </div>
-                        )}
-
-                        {isAnalyzing && (
-                            <div className="text-center py-8">
-                                <Loader2 className="animate-spin text-purple-600 mx-auto mb-2" />
-                                <p className="text-purple-800 text-sm font-bold uppercase tracking-widest animate-pulse">Analyzing Content...</p>
-                            </div>
-                        )}
-
-                        {currentVideoFile.aiResult && (
-                            <div className="space-y-6">
-                                <div>
-                                    <label className="text-[10px] font-black text-purple-800 uppercase tracking-widest mb-1 block">Suggested Title</label>
-                                    <p className="text-lg text-gray-900 font-extrabold leading-tight">{currentVideoFile.aiResult.title}</p>
-                                </div>
-
-                                <div>
-                                    <label className="text-[10px] font-black text-purple-800 uppercase tracking-widest mb-1 block">Description</label>
-                                    <p className="text-gray-700 text-sm leading-relaxed font-medium">{currentVideoFile.aiResult.description}</p>
-                                </div>
-
-                                <div>
-                                    <label className="text-[10px] font-black text-purple-800 uppercase tracking-widest mb-1 block">Viral Tags</label>
-                                    <div className="flex flex-wrap gap-2 mt-2">
-                                        {currentVideoFile.aiResult.hashtags.map(tag => (
-                                            <span key={tag} className="flex items-center gap-1 bg-white border border-purple-200 text-purple-600 px-3 py-1.5 rounded-full text-xs font-bold shadow-sm">
-                                                <Tag size={12} /> {tag}
-                                            </span>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                )}
             </div>
         </div>
     );
 }
+EOF
