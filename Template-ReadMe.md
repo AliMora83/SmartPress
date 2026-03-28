@@ -59,7 +59,7 @@ This project uses a **Multi-Agent Context Protocol (MACP)** to coordinate AI ass
 
 | Agent | Role |
 |-------|------|
-| **Qwen** | Build agent — Odoo, Python, autonomous implementation |
+| **Antigravity** | Build agent — Odoo, Python, autonomous implementation |
 | **Claude** | Full-stack agent — React, TypeScript, architecture |
 | **Gemini** | Analysis + low-priority automation tasks |
 | **Comet (Perplexity)** | Cross-check, ratification, architecture review |
