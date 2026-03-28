@@ -1,23 +1,40 @@
-# SmartPress
+# 🗜️ SmartPress
 
-Fast, smart compression for images and video.
+> Fast, smart compression for images and videos — powered by Next.js 15 + Python FastAPI + FFmpeg.
 
-## Features
+---
 
-- 🎨 **Beautiful UI** - Two-column layout with Smart-Bot mascot branding
-- 🚀 **Fast Compression** - Client-side and server-side compression support
-- 📦 **Batch Operations** - Compress All and Download All functionality  
-- 🎯 **Multiple Formats** - Support for images (JPG, PNG) and videos (MP4)
-- 🤖 **Smart Branding** - Montserrat typography with responsive design
+## 📌 Overview
 
-## Tech Stack
+**SmartPress** is a self-contained media compression utility with a Smart-Bot branded two-column UI. It supports batch image (JPG, PNG) and video (MP4) compression with client-side previews and a Python FastAPI backend handling FFmpeg processing.
 
-- **Frontend**: Next.js 15 with TypeScript
-- **Backend**: Python FastAPI with FFmpeg
-- **Styling**: Tailwind CSS
-- **Fonts**: Montserrat (Extra Bold)
+- **Owner:** Ali Mora
+- **Location:** Johannesburg, ZA
+- **Updated:** 2026-03-29
+- **Status:** 🟡 Active Development
 
-## Getting Started
+---
+
+## 🎯 Mission
+
+Ship a fast, beautiful, zero-auth media compression tool that anyone can self-host or deploy to Vercel + Cloud Run in minutes.
+
+---
+
+## 🏗 Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Frontend | Next.js 15, TypeScript, Tailwind CSS |
+| Backend | Python FastAPI |
+| Media Processing | FFmpeg (via Python subprocess) |
+| Styling / Fonts | Tailwind CSS, Montserrat (Extra Bold) |
+| Deployment (FE) | Vercel |
+| Deployment (BE) | Docker + Google Cloud Run |
+
+---
+
+## 🚀 Getting Started
 
 ### Frontend
 
@@ -33,47 +50,101 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 ```bash
 cd backend
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
 The backend API will run on [http://localhost:8000](http://localhost:8000).
 
-## Project Structure
+---
+
+## 🗂 Project Structure
 
 ```
-smart-compressor/
-├── app/                 # Next.js app directory
-├── components/          # React components
-├── backend/            # Python FastAPI backend
-├── public/             # Static assets (Smart-Bot mascot, icons)
+SmartPress/
+├── app/               # Next.js app directory
+├── components/        # React components
+├── backend/           # Python FastAPI + FFmpeg
+├── public/            # Smart-Bot mascot + static assets
+├── Master.md          # MACP project master file
+├── DEPLOY.md          # Deployment guide
+├── DEPLOY_CLOUD_RUN.md
 └── README.md
 ```
 
-## Features in Detail
+---
 
-### UI Redesign
-- Fixed left sidebar with Smart-Bot branding
-- Scrollable right content area
-- Adaptive upload box positioning
-- Montserrat typography (108px title, 24px subtitle)
+## ✨ Features
 
-### Batch Operations
-- **Compress All**: Process multiple files sequentially
-- **Download All**: Download all compressed files at once
+- 🎨 **Beautiful UI** — Two-column layout with Smart-Bot mascot branding
+- 🚀 **Fast Compression** — Client-side preview + server-side FFmpeg processing
+- 📦 **Batch Operations** — Compress All and Download All functionality
+- 🎯 **Multiple Formats** — JPG, PNG (images) and MP4 (video)
+- 🤖 **Smart Branding** — Montserrat typography with responsive design
+- 📝 **Auto Prefix** — All compressed outputs named `smartpress_*` for easy identification
 
-### Filename Prefix
-All compressed files are prefixed with `smartpress_` for easy identification.
+---
 
-## Learn More
+## 🤖 AI Agent Briefing Protocol
 
-To learn more about Next.js, check out:
-- [Next.js Documentation](https://nextjs.org/docs)
-- [Learn Next.js](https://nextjs.org/learn)
+> **If you are an AI assistant (Claude, Gemini, Antigravity, Comet, or any agent) reading this file:**
 
-## Deploy on Vercel
+Before starting any work on this project, you **must** read the full `Master.md` file. It is the single source of truth and contains:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new).
+- Architecture decisions and ratified tech choices
+- Current milestone, next step, and blockers
+- AI model assignments
+- Existing AI reviews and cross-checked decisions
 
-Check out the [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### 📥 Master.md — Direct Links
+
+```
+https://github.com/AliMora83/SmartPress/blob/main/Master.md
+```
+
+Raw (for programmatic access):
+
+```
+https://raw.githubusercontent.com/AliMora83/SmartPress/main/Master.md
+```
+
+### ✅ Briefing Protocol
+
+Use this prompt at the start of any session:
+
+> *"Before starting SmartPress work, read Master.md at the URL above and check the **AI Reviews & Artifacts** section for existing ratified decisions. Do not re-architect anything marked `Ratified` without explicit approval from Ali."*
+
+### 🔁 After Your Work
+
+Commit any decisions, architecture choices, or review notes back to `Master.md` under the **AI Reviews & Artifacts** section, following the existing format. Set status to `Agent Reviewed` so the next agent knows to cross-check it.
+
+---
+
+## 🤖 AI Agents
+
+| Agent | Role |
+|-------|------|
+| **Claude** | Full-stack agent — React, TypeScript, architecture |
+| **Gemini** | Analysis + automation tasks |
+| **Comet (Perplexity)** | Cross-check, ratification, architecture review |
+| **Antigravity** | Build agent — autonomous implementation |
+
+Review consensus states: `Unreviewed` → `Agent Reviewed` → `Cross-Checked` → `Ratified`
+
+---
+
+## 📡 Mission Control
+
+This project is tracked in **Namka Mission Control** — the central hub for all of Ali's projects.
+
+| Resource | Link |
+|----------|------|
+| Mission Control Master.md | [Namka-Mission-Control](https://github.com/AliMora83/Namka-Mission-Control/blob/main/Master.md) |
+| SmartPress Master.md | [Master.md](./Master.md) |
+| Deploy Guide | [DEPLOY.md](./DEPLOY.md) |
+| Cloud Run Deploy | [DEPLOY_CLOUD_RUN.md](./DEPLOY_CLOUD_RUN.md) |
+
+---
+
+_Last updated by: Comet (Perplexity) on 2026-03-29_
