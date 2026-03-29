@@ -140,7 +140,6 @@ Reviewed existing README.md, project structure, Dockerfile, and deployment confi
 - [DEPLOY.md](./DEPLOY.md) - Deployment guide
 - [DEPLOY_CLOUD_RUN.md](./DEPLOY_CLOUD_RUN.md) - Cloud Run deployment
 - [Namka Control Dashboard](https://control.namka.cloud) - *(coming soon)*
-- [Namka Mission Control](https://github.com/AliMora83/Namka-Mission-Control) - Parent repo
 
 ---
 
