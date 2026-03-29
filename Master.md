@@ -1,212 +1,148 @@
-# 🗜️ SmartPress – AI-Assisted Development
-
-> **Version:** 1.0 | **Last Updated:** 2026-03-29 | **Owner:** Ali Mora
-> **Mission Control:** [https://github.com/AliMora83/Namka-Mission-Control/blob/main/Master.md](https://github.com/AliMora83/Namka-Mission-Control/blob/main/Master.md)
+# 🧐 🤖 SmartPress – Master.md
+> Last updated: 2026-03-29 | Owner: Ali Mora | Namka Ecosystem
 
 ---
 
-## 📖 How to Use This File
-
-**For Ali:** Update the Project Overview, Current Goal, and Decision Log as the project evolves.
-
-**For AI Agents:** Before starting work on this project:
-1. Read this `Master.md` file first
-2. Check the **AI Reviews & Artifacts** section for existing architectural decisions
-3. Follow the **Multi-Agent Context Protocol (MACP)** below
-4. Commit your review to this file when done
+## ⚠️ For AI Agents
+This is the single source of truth for this project.
+Read this entire file before taking any action.
+Do not rely on chat history alone — this file persists across all sessions.
+After completing work, add a Review Log entry below.
 
 ---
 
-## 🚀 Project Overview
+## 📌 Project Snapshot
 
-**Description:** SmartPress is a fast, smart compression tool for images (JPG, PNG) and videos (MP4), featuring a two-column UI with Smart-Bot branding, batch operations, and a Python FastAPI backend powered by FFmpeg.
-
-**Status:** In Progress
-
-**Priority:** Priority 2 – Active Development
-
-**Stack:** TypeScript / Next.js 15 / Python / FastAPI / FFmpeg / Tailwind CSS
-
-**Repo:** [https://github.com/AliMora83/SmartPress](https://github.com/AliMora83/SmartPress)
-
-**Live URL:** _Not yet deployed_
-
-**AI Model Assigned:** Comet / Claude
+| Field | Value |
+|-------|-------|
+| **Project Name** | SmartPress |
+| **Repo** | https://github.com/AliMora83/SmartPress |
+| **Stack** | TypeScript / Next.js 15 / Python / FastAPI / FFmpeg / Tailwind CSS |
+| **Status** | Active |
+| **Priority** | 🟡 Priority 2 |
+| **Assigned Agent** | Comet / Claude |
+| **Dashboard Visible** | Yes |
+| **Last Updated** | 2026-03-29 |
 
 ---
 
-## 🎯 Current Goal
+## 🎯 Project Goal
 
-**Next Milestone:** Ship a stable MVP with working image + video compression and Download All functionality
-
-**Next Step:** Validate FFmpeg pipeline stability and add error handling for unsupported formats
-
-**Blocker:** None
-
-**Effort Estimate:** M
-
-**Progress:** 60%
+SmartPress is a fast, smart compression tool for images (JPG, PNG) and videos (MP4), featuring a two-column UI with Smart-Bot branding, batch operations, and a Python FastAPI backend powered by FFmpeg. The goal is to ship a stable, zero-auth MVP that anyone can self-host or deploy to Vercel + Cloud Run in minutes.
 
 ---
 
-## 🏗 Tech Stack & Dependencies
+## 🏗 Architecture
 
-- **Frontend:** Next.js 15, TypeScript, Tailwind CSS, Montserrat (Extra Bold)
-- **Backend:** Python FastAPI
-- **Media Processing:** FFmpeg (via Python subprocess)
+### Stack
+- **Framework:** Next.js 15
+- **Language:** TypeScript
+- **Styling:** Tailwind CSS + Montserrat (Extra Bold)
 - **Database:** None (stateless file processing)
 - **Auth:** None (public tool)
-- **Deployment:** Vercel (frontend), Docker / Cloud Run (backend)
-- **APIs:** None (fully self-contained)
+- **AI:** None (FFmpeg-powered backend)
+- **Hosting:** Vercel (frontend) / Docker + Google Cloud Run (backend)
 
----
-
-## 🤖 Multi-Agent Context Protocol (MACP)
-
-> **Critical:** All agents must follow this protocol to prevent hallucinations and ensure coordination.
-
-### Workflow for AI Agents
-
-1. **Read Master.md first** — Check the **AI Reviews & Artifacts** section below for existing decisions.
-2. **Review consensus states:**
-   - `Unreviewed` → No agent has reviewed this yet
-   - `Agent Reviewed` → One agent has reviewed (needs cross-check)
-   - `Cross-Checked` → Two agents agree (pending Ali's ratification)
-   - `Ratified` → **Locked truth** — do not re-architect without Ali's explicit approval
-3. **Document your work:**
-   - After completing a task or reviewing architecture, add an entry to **AI Reviews & Artifacts** (format below)
-   - Commit the update to this `Master.md` file
-   - Mark the entry as `Agent Reviewed`
-4. **Cross-check other agents' work:**
-   - If you see an `Agent Reviewed` entry, read it and either confirm or flag disagreements
-   - Update the status to `Cross-Checked` if you agree
-   - If you disagree, add your conflicting review and mark it `Needs Resolution`
-
-### Why This Matters
-- **Prevents hallucinations:** Agents won't invent APIs, file paths, or architectures that don't exist
-- **Ensures consistency:** All agents work from the same source of truth
-- **Saves time:** No rework from conflicting decisions
-
----
-
-## 🤖 AI Reviews & Artifacts
-
-> This section is the shared context layer for all AI agents working on this project.
-> Before starting work, read the relevant entries here to understand existing architectural decisions.
-
-### Review Entry Format
-
-When adding a review, use this format:
-
-```markdown
----
-### YYYY-MM-DD — [Task/Feature Name] ([Agent Name] / [Provider])
-**Status:** `[Unreviewed / Agent Reviewed / Cross-Checked / Ratified]`
-**Reviewed by:** [Agent Name] ([Provider])
-**Scope:** [Brief description of what was reviewed/built]
-
-#### Key Decisions
-- [Decision 1]
-- [Decision 2]
-
-#### Implementation Notes
-[Any code snippets, architecture diagrams, or important technical details]
-
-#### Next Step
-[What the next agent should do, or what needs Ali's approval]
-
----
-> 🔁 **Next:** [Agent name] to cross-check and mark as `Ratified`, or Ali to approve.
+### Data Flow
+```
+User → Next.js 15 (Vercel) → FastAPI Backend (Cloud Run) → FFmpeg subprocess → Compressed Output → Client Download
 ```
 
 ---
 
-### 2026-03-29 — Initial Master.md Structure & Architecture Review (Comet / Perplexity)
+## 📋 Current Status
 
-**Status:** `Agent Reviewed` — pending cross-check
+### ✅ Completed
+- [x] Project scaffolding — Next.js 15 + TypeScript + Tailwind CSS
+- [x] Python FastAPI backend with FFmpeg integration
+- [x] Two-column UI with Smart-Bot mascot branding
+- [x] Image compression (JPG, PNG)
+- [x] Video compression (MP4)
+- [x] Batch Compress All + Download All functionality
+- [x] `smartpress_*` output file naming convention
+- [x] Dockerfile + Cloud Run deployment config
+- [x] DEPLOY.md and DEPLOY_CLOUD_RUN.md guides
+- [x] MACP protocol and initial Master.md
 
-**Reviewed by:** Comet (Perplexity)
+### 🔄 In Progress
+- [ ] FFmpeg pipeline stability validation
+- [ ] Error handling for unsupported media formats
 
-**Scope:** Initial creation of Master.md; review of existing README.md, project structure, and tech stack for SmartPress.
+### 🔜 Next Steps
+- [ ] Add progress indicator for large video file compression
+- [ ] WebP and AVIF output format support
+- [ ] User-defined quality sliders per format
+- [ ] Deploy frontend to Vercel + backend to Cloud Run
 
-#### Key Decisions
-1. **Architecture:** Two-tier — Next.js 15 frontend (Vercel) + Python FastAPI backend (Docker/Cloud Run)
-2. **Media processing:** FFmpeg invoked via Python subprocess in the FastAPI backend; client-side preview only in the frontend
-3. **File naming:** All compressed outputs prefixed with `smartpress_` for easy identification
-4. **Batch operations:** Sequential processing (Compress All → Download All) — no parallel queue implemented yet
-5. **Auth/DB:** None — SmartPress is a stateless public tool; no user data stored
-6. **Deployment:** Frontend on Vercel; backend containerised via Dockerfile + `.gcloudignore` suggests Cloud Run as target
-
-#### Implementation Notes
-- Project structure: `app/` (Next.js), `components/` (React), `backend/` (FastAPI + FFmpeg), `public/` (Smart-Bot mascot assets)
-- Backend runs on port 8000; frontend proxies compression requests to it
-- CI/CD workflow exists under `.github/workflows/` — review before deploying
-
-#### Next Step
-Claude or Gemini to cross-check backend FFmpeg pipeline, validate error handling for unsupported formats, and mark as `Ratified`.
-
----
-
-> 🔁 **Next:** Claude to cross-check and mark as `Ratified`, or Ali to approve architecture decisions above.
-
----
-
-## 📡 Integration with Mission Control
-
-This project is tracked in **Mission Control** (the central hub for all Ali's projects).
-
-- **Mission Control Master.md:** [https://github.com/AliMora83/Namka-Mission-Control/blob/main/Master.md](https://github.com/AliMora83/Namka-Mission-Control/blob/main/Master.md)
-- **Live Dashboard:** `http://localhost:3000` _(when Mission Control is running)_
-
-### How Updates Flow
-1. Agent updates this project's `Master.md` (commits review/progress)
-2. Mission Control dashboard reads this file via GitHub raw URL
-3. Ali sees updated status in Mission Control without manual sync
-
-### Project Metadata (for Mission Control Dashboard)
-**These fields are read by Mission Control — keep them updated:**
-
-- **Status:** Active
-- **Next Step:** Validate FFmpeg pipeline stability and add error handling
-- **Blocker:** None
-- **AI Model:** Comet / Claude
-- **Effort:** M
-- **Progress:** 60%
-- **Last Commit:** _(Auto-pulled from GitHub)_
+### 🚫 Blockers
+- None
 
 ---
 
-## 📝 Notes & Decisions
+## 🔑 Key Decisions
+> Log important architectural or product decisions here so agents don't re-debate them.
 
-### Decision Log
-
-| Date | Decision | Rationale | Decided By |
-|------|----------|-----------|------------|
-| 2026-03-29 | Use Python FastAPI + FFmpeg for backend | FFmpeg is the industry standard for media processing; FastAPI is lightweight and async-friendly | Ali / Comet |
-| 2026-03-29 | Next.js 15 for frontend | TypeScript support, Vercel deployment, fast dev cycle | Ali |
-| 2026-03-29 | Stateless architecture (no DB/auth) | SmartPress is a utility tool — no user accounts needed for MVP | Ali |
-| 2026-03-29 | Docker + Cloud Run for backend deployment | `.gcloudignore` + `Dockerfile` already present in repo | Ali |
-
-### Known Issues
-- Error handling for unsupported media formats not yet implemented
-- No progress indicator for large video files during compression
-
-### Future Enhancements
-- Progress bar / streaming feedback for video compression
-- WebP and AVIF output format support
-- User-defined quality sliders per format
-- Optional: cloud storage integration (GCS / S3) for compressed outputs
+| Date | Decision | Reason |
+|------|----------|--------|
+| 2026-03-29 | Python FastAPI + FFmpeg for backend | FFmpeg is the industry standard for media processing; FastAPI is lightweight and async-friendly |
+| 2026-03-29 | Next.js 15 for frontend | TypeScript support, Vercel deployment, fast dev cycle |
+| 2026-03-29 | Stateless architecture (no DB/auth) | SmartPress is a utility tool — no user accounts needed for MVP |
+| 2026-03-29 | Docker + Cloud Run for backend deployment | `.gcloudignore` + `Dockerfile` already present in repo |
 
 ---
 
-## 🔗 Quick Links
+## 📁 File Structure
 
-- **Repo:** [https://github.com/AliMora83/SmartPress](https://github.com/AliMora83/SmartPress)
-- **Live URL:** _Not yet deployed_
-- **Mission Control:** [https://github.com/AliMora83/Namka-Mission-Control/blob/main/Master.md](https://github.com/AliMora83/Namka-Mission-Control/blob/main/Master.md)
-- **Deploy Guide:** [DEPLOY.md](./DEPLOY.md)
-- **Cloud Run Deploy Guide:** [DEPLOY_CLOUD_RUN.md](./DEPLOY_CLOUD_RUN.md)
+```
+SmartPress/
+├── AGENT-ONBOARDING.md      # Agent rules (same across all projects)
+├── Master.md                # This file — source of truth
+├── README.md                # Human-readable overview
+├── DEPLOY.md                # Deployment guide
+├── DEPLOY_CLOUD_RUN.md      # Cloud Run deployment guide
+├── Dockerfile               # Backend containerisation
+├── app/                     # Next.js app directory
+├── components/              # React components
+├── backend/                 # Python FastAPI + FFmpeg
+└── public/                  # Smart-Bot mascot + static assets
+```
 
 ---
 
-_Last updated by: Comet (Perplexity) on 2026-03-29_
+## 📋 Review Log
+
+> Agents: append new entries at the TOP of this section (newest first)
+
+---
+
+### Review Entry — 2026-03-29
+**Agent**: Comet (Perplexity)
+**Status**: Agent Reviewed
+**Topic**: Initial Master.md structure & architecture review
+
+#### Analysis
+Reviewed existing README.md, project structure, Dockerfile, and deployment configs. Two-tier architecture confirmed: Next.js 15 frontend (Vercel) + Python FastAPI backend (Docker/Cloud Run). FFmpeg invoked via Python subprocess. Batch operations are sequential — no parallel queue yet. Project is stateless with no DB or auth required for MVP. CI/CD workflow exists under `.github/workflows/`.
+
+#### Recommendations
+- Validate FFmpeg pipeline stability and add error handling for unsupported formats
+- Add a progress bar / streaming feedback for large video files
+- Consider WebP and AVIF output support post-MVP
+
+#### Next Action
+> ⚡ **Claude to cross-check** FFmpeg pipeline, validate error handling for unsupported formats, and mark architecture decisions as `Ratified`.
+
+---
+
+## 🔗 Related Resources
+
+- [AGENT-ONBOARDING.md](./AGENT-ONBOARDING.md) - Agent rules & MACP protocol
+- [README.md](./README.md) - Project overview
+- [DEPLOY.md](./DEPLOY.md) - Deployment guide
+- [DEPLOY_CLOUD_RUN.md](./DEPLOY_CLOUD_RUN.md) - Cloud Run deployment
+- [Namka Control Dashboard](https://control.namka.cloud) - *(coming soon)*
+- [Namka Mission Control](https://github.com/AliMora83/Namka-Mission-Control) - Parent repo
+
+---
+
+*This is a living document. AI agents update this file with reviews, status changes, and recommendations.*
+*Newest Review Log entries go at the TOP.*
