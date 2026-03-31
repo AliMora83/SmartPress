@@ -1,0 +1,147 @@
+# Stabilise FFmpeg — SmartPress Backend
+
+> Scope: Large video compression stability and robust error handling  
+> Targets:  
+> 1) “Stabilise FFmpeg pipeline for large video files.”  
+> 2) “Implement error handling for unsupported formats.” [page:1]
+
+---
+
+## 1. Current Architecture (High Level)
+
+- **Frontend**: Next.js 15 (App Router), TypeScript, Tailwind CSS. [page:1]  
+- **Backend**: Python FastAPI service wrapping FFmpeg. [page:1]  
+- **Deployment targets**:  
+  - Frontend → Vercel.  
+  - Backend → Google Cloud Run (containerised). [page:1]
+
+SmartPress needs a **synchronous** upload → compress → download flow for MVP, but designed so it can evolve to async jobs later if needed.
+
+---
+
+## 2. Goals for FFmpeg Pipeline Stabilisation
+
+1. Safely handle **large video files** (hundreds of MB to multi‑GB) without exhausting memory.  
+2. Ensure FFmpeg never hangs indefinitely (bounded execution time).  
+3. Provide clear, structured responses back to the frontend.  
+4. Always clean up temporary files, even on failures.
+
+### 2.1. Proposed Synchronous Flow
+
+1. Client uploads file via POST `/compress/video`.  
+2. FastAPI streams the upload to disk in **chunks** (no full in‑memory reads).  
+3. Backend validates the file (size, type, readability).  
+4. Backend invokes FFmpeg with a stable preset and timeout.  
+5. On success: return the compressed file (or a signed URL).  
+6. On failure: return a typed error with enough detail for UX and logging.  
+7. Always delete temp files after the response.
+
+### 2.2. Key Backend Behaviours (Python/FastAPI)
+
+- Use chunked writes (e.g. 4–8MB chunks) to a temp directory.  
+- Enforce `MAX_UPLOAD_BYTES` and reject oversize uploads early.  
+- Use `ffprobe` to validate input before compression (duration, streams, basic sanity).  
+- Run FFmpeg via `subprocess.run(..., timeout=FFMPEG_TIMEOUT, capture_output=True)`.  
+- Map FFmpeg exit codes / stderr patterns to **semantic error types** (see Error Handling section).
+
+---
+
+## 3. Error Handling – Requirements
+
+We want **predictable, typed errors** instead of generic 500s. Primary categories:
+
+1. **Client-side issues (4xx)**  
+   - File too large (413)  
+   - Unsupported container or codec (415 / 400)  
+   - Corrupt/unreadable media (400)  
+   - Empty upload (400)
+
+2. **Server-side issues (5xx)**  
+   - FFmpeg internal failure (500)  
+   - Compression timeout (504)  
+   - Temporary storage or IO problems (507 / 500)
+
+3. **Developer / infra issues**  
+   - Misconfigured FFmpeg binary, missing codec, permission issues (500, with detailed logs only).
+
+Each error should include:
+
+```json
+{
+  "error_code": "UNSUPPORTED_FORMAT",
+  "http_status": 415,
+  "message": "This video format is not supported yet.",
+  "detail": "ffmpeg stderr tail / internal code here",
+  "retryable": false
+}
+```
+
+---
+
+## 4. How Gemini Can Help (Google Ecosystem Focus)
+
+Please review and suggest how to best use **Google Cloud + Gemini** to enhance both tasks:
+
+### 4.1. Google Cloud Run & Cloud Storage
+
+- Recommend best practices for deploying the FastAPI + FFmpeg service on **Cloud Run**:  
+  - Memory/CPU sizing for large video workloads.  
+  - Concurrency settings (e.g. 1–2 requests per instance for heavy FFmpeg jobs).  
+  - Using **Cloud Storage** buckets instead of local disk for input/output:  
+    - Direct upload from Next.js to signed GCS URLs.  
+    - Backend reads from GCS and writes result back to GCS.  
+    - Short‑lived signed URLs for download, avoiding large responses from Cloud Run.
+
+### 4.2. Error Handling Enhancements with Gemini
+
+We’d like ideas on using **Gemini models** to improve robustness and developer ergonomics:
+
+1. **FFmpeg stderr analysis & classification**  
+   - Given raw FFmpeg stderr, propose a lightweight prompt / tool pattern where Gemini:  
+     - Classifies errors into semantic types (`UNSUPPORTED_FORMAT`, `CORRUPT_FILE`, `RESOURCE_LIMIT`, etc.).  
+     - Suggests actionable remediation (e.g. “transcode audio to AAC first”, “resize before encoding”).  
+   - Output should map back to the structured error format described above.
+
+2. **Config tuning suggestions**  
+   - Given workload patterns (typical resolutions, durations, bitrates) and Cloud Run limits:  
+     - Suggest optimal FFmpeg presets (`crf`, `preset`, scaling filters).  
+     - Suggest Cloud Run CPU/memory configs and timeouts.  
+     - Suggest when to offload long jobs to async workflows (Cloud Tasks / Workflows).
+
+3. **Intelligent retry strategies**  
+   - Design a decision tree where, on certain error types, the backend can:  
+     - Retry with a more conservative preset.  
+     - Fallback to a different codec or lower resolution.  
+     - Log a structured event to Cloud Logging / BigQuery for further analysis.
+
+### 4.3. Observability & Monitoring (Google Cloud)
+
+Please propose how to integrate:
+
+- **Cloud Logging**: structured logs for each compression job, including sizes, durations, error_type.  
+- **Cloud Monitoring**: dashboards/alerts for:  
+  - Error rate per endpoint.  
+  - Average/95th percentile encode time.  
+  - Cloud Run CPU/memory usage under load.  
+- **Cloud Trace / Profiler** (if relevant) for diagnosing slow operations.
+
+### 4.4. Future: Async and Scalability
+
+Even though MVP is synchronous, we’d like a **migration path** to an async/job-based architecture using Google components:
+
+- Cloud Run + **Pub/Sub** + Cloud Functions / another Cloud Run worker.  
+- Frontend receives a job ID, polls an endpoint, and downloads from GCS when ready.  
+- How Gemini could help design this transition and API shape.
+
+---
+
+## 5. Specific Questions for Gemini
+
+1. What is an optimal reference architecture on **Google Cloud** for a video compression API using FastAPI + FFmpeg + Cloud Run + Cloud Storage?  
+2. How can we use **Gemini** to:  
+   - Interpret FFmpeg logs and map them to well-defined error types and UX messages.  
+   - Suggest incremental tuning of FFmpeg and Cloud Run configuration based on historical logs.  
+3. What patterns does Google recommend for **robust error handling** and **observability** in media-processing workloads on Cloud Run?  
+4. For large videos (up to 2–4GB), what upload pattern (direct-to-GCS vs via Cloud Run) is recommended, and what concrete settings (time limits, memory, concurrency) should SmartPress start with?
+
+---
