@@ -1,0 +1,108 @@
+# Error Handling — SmartPress Compression API
+
+> Scope: Backend error model for:
+> 1) FFmpeg pipeline stabilisation (large videos)
+> 2) Unsupported formats and invalid media [page:1]
+
+SmartPress needs **predictable, typed errors** so the Next.js frontend can render clear UX states and logs can be meaningfully analysed (Cloud Logging / Gemini).
+
+---
+
+## 1. Error Model Overview
+
+Every failure response from the FastAPI backend should follow a consistent JSON shape:
+
+```json
+{
+  "error_code": "UNSUPPORTED_FORMAT",
+  "http_status": 415,
+  "message": "This video format is not supported yet.",
+  "detail": "Optional technical details or truncated ffmpeg stderr.",
+  "retryable": false
+}
+```
+
+### 1.1. Fields
+
+- `error_code`  
+  Short, stable identifier used by frontend and observability (e.g. `FILE_TOO_LARGE`, `FFMPEG_TIMEOUT`).
+
+- `http_status`  
+  HTTP status actually returned by the API.
+
+- `message`  
+  User-facing message safe to show in the UI.
+
+- `detail`  
+  Developer-facing context (truncated stderr, internal code, or diagnostics). Can be omitted or hidden from end users.
+
+- `retryable`  
+  Indicates whether the client should offer a “Try again” option or not.
+
+---
+
+## 2. Canonical Error Codes & Statuses
+
+### 2.1. Client Errors (4xx)
+
+| error_code              | http_status | Typical Cause                                    | Retryable |
+|-------------------------|------------|--------------------------------------------------|-----------|
+| `FILE_TOO_LARGE`        | 413        | Upload exceeds configured max size               | false     |
+| `EMPTY_UPLOAD`          | 400        | 0 bytes received                                 | false     |
+| `UNSUPPORTED_FORMAT`    | 415        | Container or codec not supported by pipeline     | false     |
+| `CORRUPT_MEDIA`         | 400        | `ffprobe` / FFmpeg cannot read input reliably    | false     |
+| `INVALID_REQUEST`       | 400        | Missing fields, bad query params, etc.           | false     |
+
+### 2.2. Server Errors (5xx)
+
+| error_code              | http_status | Typical Cause                                      | Retryable |
+|-------------------------|------------|----------------------------------------------------|-----------|
+| `FFMPEG_TIMEOUT`        | 504        | FFmpeg exceeded max allowed processing time        | true      |
+| `FFMPEG_FAILURE`        | 500        | Non-zero FFmpeg exit for valid input               | maybe     |
+| `STORAGE_ERROR`         | 507 / 500  | Unable to write/read temp or GCS object            | true      |
+| `INTERNAL_ERROR`        | 500        | Unhandled exceptions, misconfig, unexpected state  | maybe     |
+
+Gemini can help refine this list and propose additional codes specifically for Google Cloud / Cloud Run scenarios.
+
+---
+
+## 3. Mapping FFmpeg / ffprobe Output to Error Codes
+
+### 3.1. ffprobe Validation Step
+
+Before running FFmpeg, the backend should validate the uploaded file using `ffprobe`. Common failure cases:
+
+- Non-media file or unknown format.  
+- Truncated / corrupt container.  
+- Extremely long duration beyond configured limits.
+
+**If `ffprobe` fails:**
+
+- Map to `CORRUPT_MEDIA` if stderr indicates parsing issues.  
+- Map to `UNSUPPORTED_FORMAT` if stderr indicates unknown format/codec.  
+- Include stderr tail (truncated) in `detail`.
+
+### 3.2. FFmpeg Execution Step
+
+When FFmpeg fails, classify the error using stderr patterns:
+
+Examples (non-exhaustive):
+
+- “Unknown encoder” / “Unknown decoder” → `UNSUPPORTED_FORMAT`.  
+- “Invalid data found when processing input” → `CORRUPT_MEDIA`.  
+- “Cannot allocate memory” / “Cannot write” → `STORAGE_ERROR`.  
+- GPU/accel errors (if used later) → new dedicated codes if needed.
+
+This is a great place for **Gemini** to help:
+
+- Given FFmpeg stderr, propose a **mapping function**:
+  - Input: raw stderr (or last N lines).  
+  - Output: `error_code`, suggested `message`, `retryable` flag, and remediation hints.
+
+---
+
+## 4. UX States in Next.js Frontend
+
+The frontend should treat these error codes as **state**, not just text.
+
+### 
