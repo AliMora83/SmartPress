@@ -1,27 +1,25 @@
 {
   "project": "SmartPress",
-  "repo": "AliMora83/smartpress",
+  "repo": "AliMora83/SmartPress",
   "branch": "main",
-  "stack": "TypeScript / Next.js / Tailwind",
+  "stack": "TypeScript / Next.js 15 / Python / FastAPI / FFmpeg / Tailwind CSS",
   "status": "Active",
   "priority": 2,
   "priority_label": "🟡 Priority 2 — Active Development",
-  "progress_percent": 50,
-  "progress_label": "Development in progress",
-  "current_phase": "Phase 1",
-  "next_step": "See Master.md",
+  "progress_percent": 60,
+  "progress_label": "MVP core complete — pending deploy",
+  "current_phase": "Phase 1 — MVP Stabilisation",
+  "next_step": "FFmpeg pipeline stability validation · Error handling for unsupported formats",
   "blocker": null,
   "live_url": null,
-  "deploy_target": "Hostinger VPS",
-  "agents": [
-    "AG"
-  ],
+  "deploy_target": "Vercel (frontend) · Docker + Google Cloud Run (backend)",
+  "agents": ["Claude", "Comet"],
   "version": "1.0.0",
   "last_push": {
-    "timestamp": "2026-03-31T22:13:58.323Z",
+    "timestamp": "2026-03-31T22:16:36Z",
     "actor": "AliMora83",
-    "commit_message": "chore: implement MACP documentation and sync infrastructure",
-    "sha": "2cb8858"
+    "commit_message": "chore: bootstrap project-sync metadata",
+    "sha": "b9b3696"
   },
   "last_updated": "2026-03-31"
 }
