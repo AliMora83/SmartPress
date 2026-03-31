@@ -1,0 +1,27 @@
+{
+  "project": "SmartPress",
+  "repo": "AliMora83/smartpress",
+  "branch": "main",
+  "stack": "TypeScript / Next.js / Tailwind",
+  "status": "Active",
+  "priority": 2,
+  "priority_label": "🟡 Priority 2 — Active Development",
+  "progress_percent": 50,
+  "progress_label": "Development in progress",
+  "current_phase": "Phase 1",
+  "next_step": "See Master.md",
+  "blocker": null,
+  "live_url": null,
+  "deploy_target": "Hostinger VPS",
+  "agents": [
+    "AG"
+  ],
+  "version": "1.0.0",
+  "last_push": {
+    "timestamp": "2026-03-31T22:13:58.323Z",
+    "actor": "AliMora83",
+    "commit_message": "chore: implement MACP documentation and sync infrastructure",
+    "sha": "2cb8858"
+  },
+  "last_updated": "2026-03-31"
+}
