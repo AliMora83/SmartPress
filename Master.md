@@ -1,7 +1,7 @@
 # SmartPress — Intelligent File Compression
 
-> Owner: Ali Mora | Location: Johannesburg, ZA
-> Last updated: 2026-04-01 | Version: 1.1.0
+> Owner: Ali Mora | Location: Johannesburg, ZA  
+> Last updated: 2026-04-01 | Version: 1.2.0
 
 ## 🎯 Mission
 
@@ -14,10 +14,37 @@ Provide a fast, professional, and visually stunning web interface for batch imag
 - **Typography**: Montserrat (Extra Bold for titles)
 - **Deployment**: Vercel (Frontend) / Google Cloud Run (Backend)
 
+---
+
+## ✅ Always-On Constraint
+
+SmartPress must remain **functional at the end of every phase**. No phase may leave the product in a broken or offline state.
+
+### Definition of “Functional”
+
+At minimum, the following must work in at least one verified environment (local or deployed):
+
+- Frontend loads without fatal errors.
+- Backend responds successfully to a health check (`/` or `/health`).
+- A user can complete one full flow: **upload → compress → download**.
+- Errors are rendered as structured UX states (typed error model), not generic crashes or silent failures.
+
+---
+
 ## 📋 Build Phases
 
-### Phase 1 ✅ MVP Stabilisation
-*Focus: Stabilization without architectural changes.*
+### Phase 1 🔧 MVP Stabilisation
+
+*Focus: Stabilization without architectural changes, with a working synchronous flow.*
+
+**Objectives**
+
+- Implement a working synchronous compression path:
+  - upload file → validate → compress with FFmpeg → return compressed output.
+- Add robust `ffprobe` validation and a canonical error model.
+- Ensure the app is operational in local dev and at least one deployed environment.
+
+**Tasks**
 
 - [x] Initial UI redesign with fixed sidebar and Montserrat branding.
 - [x] Backend FastAPI scaffold with FFmpeg integration.
@@ -25,33 +52,124 @@ Provide a fast, professional, and visually stunning web interface for batch imag
 - [x] **Task 1.2** — BackgroundTask Transition: Move `ffmpeg.run` into FastAPI `BackgroundTasks`; API returns 202 Accepted immediately to prevent frontend timeouts on large files.
 - [x] **Task 1.3** — Structured Error Schema: Map FFmpeg exit codes to the canonical JSON error model (`CORRUPT_MEDIA`, `FILE_TOO_LARGE`, `UNSUPPORTED_FORMAT`, `FFMPEG_TIMEOUT`, etc.). See `Error Handling` file.
 
+**Phase 1 Runtime Rule**
+
+Phase 1 is only considered **fully complete** when:
+
+- Frontend can call the backend and successfully compress at least one sample file.
+- Backend returns typed error responses for invalid/corrupt/unsupported inputs.
+- One environment (local or deployed) passes the full upload → compress → download smoke test.
+
+---
+
 ### Phase 2 🔄 The Asynchronous Leap
-*Focus: Decoupling compute from the API.*
+
+*Focus: Decoupling compute from the API while staying usable throughout.*
+
+**Objectives**
+
+- Move heavy FFmpeg workloads off the request-response thread (Cloud Run Jobs).
+- Introduce job-based processing with status polling.
+- Preserve an operational compression path throughout migration.
+
+**Tasks**
 
 - [ ] **Task 2.1** — Cloud Run Jobs Integration: Move heavy FFmpeg execution out of the main API container into **Cloud Run Jobs**.
-- [ ] **Task 2.2** — Status Polling API: Implement `/status/{job_id}` endpoint; frontend transitions from single "waiting" state to progress-tracking (Queued → Processing → Finalizing).
-- [ ] **Task 2.3** — Persistent Storage (GCS): Replace `temp_uploads` and `temp_processed` local directories with **Google Cloud Storage** buckets for durability and scaling.
+- [ ] **Task 2.2** — Status Polling API:
+  - Implement `/status/{job_id}` endpoint.
+  - Frontend transitions from a single “waiting” state to progress-tracking states:
+    - `Queued`, `Processing`, `Finalizing`, `Completed`, `Failed`.
+- [ ] **Task 2.3** — Persistent Storage (GCS):
+  - Replace `temp_uploads` and `temp_processed` local directories with **Google Cloud Storage** buckets for durability and scaling.
+
+**Phase 2 Runtime Rule**
+
+- Do **not** remove or break the existing working compression flow until:
+  - Cloud Run Jobs + status polling are fully verified.
+- Job-based processing must be introduced as an **additive improvement**, not a breaking replacement.
+- End-of-phase check:
+  - A user can still complete upload → compress → download via the current UX (synchronous or job-based).
+  - Status states are reflected correctly in the UI.
+
+---
 
 ### Phase 3 🧠 Intelligent Diagnostics & Scale
-*Focus: AI Integration and high-capacity handling.*
 
-- [ ] **Task 3.1** — Gemini Log Interpreter: Integrate **Vertex AI (Gemini 1.5 Flash)** to analyze FFmpeg `stderr` on failure and generate user-friendly remediation tips.
-- [ ] **Task 3.2** — Direct-to-GCS Uploads: Implement **Signed URLs** so the browser uploads files directly to Cloud Storage, bypassing Cloud Run request size limits.
-- [ ] **Task 3.3** — Edge Delivery: Enable **Cloud CDN** for the `processed/` bucket for rapid downloads for users in Southern Africa and beyond.
+*Focus: AI integration and high-capacity handling, with graceful degradation.*
+
+**Objectives**
+
+- Use Gemini to interpret FFmpeg logs into human-friendly messages and remediation tips.
+- Optimize upload and delivery paths using signed URLs and CDN.
+- Ensure core compression works even if AI/CDN are down.
+
+**Tasks**
+
+- [ ] **Task 3.1** — Gemini Log Interpreter:
+  - Integrate **Vertex AI (Gemini 1.5 Flash)** to analyze FFmpeg `stderr` on failure.
+  - Generate user-friendly remediation tips (e.g., “File header missing, try re-exporting from your editor.”).
+- [ ] **Task 3.2** — Direct-to-GCS Uploads:
+  - Implement **Signed URLs** so the browser uploads files directly to Cloud Storage, bypassing Cloud Run request size limits and reducing memory/CPU on the API.
+- [ ] **Task 3.3** — Edge Delivery:
+  - Enable **Cloud CDN** for the `processed/` bucket for rapid downloads for users in Southern Africa and beyond.
+
+**Phase 3 Runtime Rule**
+
+- Compression must still work if:
+  - Gemini log interpretation is unavailable or misconfigured.
+  - Cloud CDN is misconfigured or temporarily disabled.
+- AI and edge features are **enhancements**, not hard dependencies for the core upload → compress → download flow.
+
+---
+
+## 🚨 Blocking Runtime Issue
+
+**Status:** Open  
+**Priority:** High  
+**Owners:** Claude (review), AG (fix), Comet (documentation follow-up)
+
+The repository contains a real FastAPI backend and working compression architecture, but SmartPress is currently reported as “off” and requires runtime verification.
+
+### Suspected Integration Checks
+
+Claude and AG should verify:
+
+1. **API Route Alignment**
+   - Confirm the frontend API path matches the backend route exactly  
+     (e.g. `POST /compress-video` vs `POST /compress`).
+2. **Backend Base URL**
+   - Confirm the deployed frontend is using the correct backend base URL  
+     (not falling back to `http://localhost:8000` in production).
+3. **CORS Configuration**
+   - Confirm backend CORS `FRONTEND_URL` matches the deployed frontend origin.
+4. **Smoke Test**
+   - Run a full end-to-end smoke test in at least one environment:
+     - Upload sample file.
+     - Compress successfully.
+     - Download processed file.
+   - Log the result and any errors for Gemini/Comet analysis.
+
+### Release Rule
+
+Phase 1 must **not** be treated as operationally complete until at least one verified end-to-end flow is green and this blocking runtime issue is closed.
+
+---
 
 ## 👥 Agent Assignments
 
-| Agent | Role |
-|---|---|
-| Claude | UX & Product Decisions |
-| Comet | Documentation & Audit |
-| Gemini | Architecture & UI Proposals |
+| Agent          | Role                                   |
+|----------------|----------------------------------------|
+| Claude         | UX & Product Decisions                |
+| Comet          | Documentation & Audit                 |
+| Gemini         | Architecture & UI Proposals           |
 | AG (Antigravity) | Implementation — executes AG-Update.md |
+
+---
 
 ## 📋 Review Log
 
-| Date | Agent | Action | Notes |
-|---|---|---|---|
-| 2026-04-01 | Comet (Perplexity) | Reviewed & approved SmartPress Evolution Plan (`SmartPress-Update`) | Phase 1 tasks confirmed complete based on `Error Handling` and `Stabilise FFmpeg` suggestion files. Phase 2 & 3 added to build phases. Claude: ensure UI accommodates Job Status states (Queued, Processing, Finalizing). Comet: verify Cloud Run Jobs IAM/Pub-Sub trigger permissions in Phase 2.1. |
+| Date       | Agent              | Action                                                     | Notes |
+|-----------|--------------------|------------------------------------------------------------|-------|
+| 2026-04-01 | Comet (Perplexity) | Reviewed & approved SmartPress Evolution Plan (`SmartPress-Update`) and added Always-On Constraint + Blocking Runtime Issue | Phase 1 tasks documented as complete from an implementation/planning perspective, but operational runtime verification is still required before Phase 1 is considered fully closed. Claude: ensure UI accommodates Job Status states (Queued, Processing, Finalizing). Comet: verify Cloud Run Jobs IAM/Pub-Sub trigger permissions in Phase 2.1. |
 
 > Note to AI: Read AI_CHANGELOG.md and AGENT-ONBOARDING.md on every new chat session.
