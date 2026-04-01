@@ -14,12 +14,12 @@
   "live_url": null,
   "deploy_target": "Vercel (frontend) · Docker + Google Cloud Run (backend)",
   "agents": ["Claude", "Comet"],
-  "version": "1.1.0",
+  "version": "1.2.0",
   "last_push": {
-    "timestamp": "2026-04-01T13:04:39Z",
+    "timestamp": "2026-04-01T13:22:37Z",
     "actor": "AliMora83",
-    "commit_message": "docs: update Master.md — approve SmartPress Evolution Plan, complete Phase 1 tasks, add Phase 2 & 3, log review entry",
-    "sha": "682c26d"
+    "commit_message": "Update Master.md",
+    "sha": "50e0c9f"
   },
   "last_updated": "2026-04-01"
 }
