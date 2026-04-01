@@ -32,3 +32,6 @@ Provide a fast, professional, and visually stunning web interface for batch imag
 ## 📋 Review Log
 
 *No entries yet.*
+
+
+> Note to AI: Read AI-Changelogs.md and Agent-Onboarding.md on every new chat session.
