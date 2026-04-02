@@ -163,7 +163,7 @@ export default function Compressor() {
 
         const data = await ffmpegRef.readFile(outputName);
         /* eslint-disable @typescript-eslint/no-explicit-any */
-        const buffer = data;
+        const buffer = data instanceof Uint8Array ? data : new Uint8Array(data as unknown as ArrayBuffer);
 
         const downloadLink = URL.createObjectURL(new Blob([buffer], { type: fileItem.file.type }));
         setFiles(prev => prev.map(f =>
