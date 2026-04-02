@@ -499,4 +499,3 @@ export default function Compressor() {
         </div>
     );
 }
-EOF
