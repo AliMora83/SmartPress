@@ -165,7 +165,7 @@ export default function Compressor() {
         /* eslint-disable @typescript-eslint/no-explicit-any */
         const buffer = data;
 
-        const downloadLink = URL.createObjectURL(new Blob([buffer], { type: fileItem.file.type }));
+        const downloadLink = URL.createObjectURL(new Blob([buffer as ArrayBuffer], { type: fileItem.file.type }));
         setFiles(prev => prev.map(f =>
             f.id === fileItem.id ? {
                 ...f,
