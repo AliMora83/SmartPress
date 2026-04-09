@@ -1,173 +1,265 @@
-# AG-Update — SmartPress Phase 1 Runtime Verification
+## 📌 AG-Update Meta
 
-> Issued by: Claude (UX & Product) | Audited by: Comet  
-> Date: 2026-04-01 | Priority: 🔴 HIGH — Phase 1 Gate  
-> Target Agent: AG (Antigravity)
+- Phase: Phase 3
+- Sprint: Sprint 1 — Data Layer
+- Issued by: Claude (UX & Product Owner)
+- Date: 2026-04-04
+- Time: 17:45 SAST
+- Status: READY
 
----
+***
 
-## 🎯 Mission
+# AG-Update — Phase 3 Sprint 1: Data Layer
 
-Close the **Blocking Runtime Issue** so Phase 1 can be formally signed off.
-
-No new features. No Phase 2 work. This sprint is purely verification and fixes.
-
-Phase 1 is **not closeable** until all 4 checks below pass and a smoke test result is logged in `Master.md`.
-
----
-
-## 🔒 Pre-Work Checklist
-
-Before touching any code or config, confirm you have access to:
-
-- [ ] Vercel dashboard for the SmartPress frontend project
-- [ ] Google Cloud Console → Cloud Run → SmartPress backend service
-- [ ] Backend repository (to inspect routes and CORS config)
-- [ ] A sample test file (image or video) for the smoke test
+> **Source of truth:** `Master.md` v1.0.32 — Phase 3 approved items
+> **AG:** Read this file top to bottom before touching any code. Execute in exact sequence. Do not begin Sprint 2 work.
 
 ---
 
-## ✅ Check 1 — Backend Base URL
+## 🎯 Objective
 
-**Risk:** Frontend deployed on Vercel may be falling back to `http://localhost:8000` in production, causing all API calls to silently fail.
+Replace the current dashboard data source (single `Master.md` parse via `/api/master`) with a dedicated `/api/projects` aggregation route that fetches `PROJECT-SYNC.json` from all 7 active repos in parallel, applies interim caching, and renders typed project cards on the Dashboard.
 
-### Steps
-
-1. Open the Vercel dashboard → SmartPress project → **Settings → Environment Variables**.
-2. Locate the variable `NEXT_PUBLIC_API_URL` (or equivalent).
-3. Confirm its value is the **Cloud Run service URL**, e.g.:
-   ```
-   https://smartpress-backend-<hash>-uc.a.run.app
-   ```
-4. If it is missing or set to `localhost`, update it to the correct Cloud Run URL and trigger a **Redeploy**.
-5. After redeploy, open the deployed frontend URL in a browser, open DevTools → Network tab, and confirm outbound API requests are going to the Cloud Run URL — not localhost.
-
-### Done When
-`NEXT_PUBLIC_API_URL` is confirmed set to Cloud Run URL in Vercel dashboard, and DevTools confirms requests hit the correct host.
+This implements **Master.md Phase 3 Item 1: "Implement caching for GitHub API calls"**.
 
 ---
 
-## ✅ Check 2 — API Route Alignment
+## 📦 Repos to Aggregate
 
-**Risk:** Frontend may be calling `POST /compress-video` while the backend exposes `POST /compress` (or vice versa), causing 404s with no obvious error surfaced to the user.
+AG must fetch `PROJECT-SYNC.json` from each of these repos. All are under the `AliMora83` GitHub account:
 
-### Steps
-
-1. Navigate to the deployed backend's auto-generated API docs:
-   ```
-   https://<your-cloud-run-url>/docs
-   ```
-2. Locate the compression endpoint — note the **exact path and HTTP method**.
-3. Open the frontend codebase and find where the API call is made (search for `fetch(` or `axios` calls targeting the backend).
-4. Compare the frontend path against the FastAPI `/docs` path character-for-character.
-5. If they differ, update the frontend to match the backend route exactly.
-6. Redeploy the frontend if any change was made.
-
-### Done When
-Frontend API call path matches the FastAPI `/docs` route exactly. Document both values in the smoke test log below.
+| # | Repo | PROJECT-SYNC.json path |
+|---|---|---|
+| 1 | `namka-control` | `/PROJECT-SYNC.json` |
+| 2 | `Odoo-POS-Terminal` | `/PROJECT-SYNC.json` |
+| 3 | `SmartPress` | `/PROJECT-SYNC.json` |
+| 4 | `Atlas-Website` | `/PROJECT-SYNC.json` |
+| 5 | `Kora-Tutor` | `/PROJECT-SYNC.json` |
+| 6 | `EventSaas` | `/PROJECT-SYNC.json` |
+| 7 | `Odoo-BA-API` | `/PROJECT-SYNC.json` |
 
 ---
 
-## ✅ Check 3 — CORS Configuration
+## 🗂️ Files to Create or Modify
 
-**Risk:** Backend CORS `FRONTEND_URL` (or `allow_origins`) may not include the deployed Vercel URL, causing all cross-origin requests to be rejected by the browser.
+### 1. CREATE — `src/types/project-sync.ts`
 
-### Steps
+Create a TypeScript interface that matches the live `PROJECT-SYNC.json` schema exactly.
 
-1. Open the backend source — locate CORS configuration (typically in `main.py` or a middleware config):
-   ```python
-   # Example FastAPI CORS
-   app.add_middleware(
-       CORSMiddleware,
-       allow_origins=["https://smartpress.vercel.app"],  # ← verify this
-       allow_methods=["*"],
-       allow_headers=["*"],
-   )
-   ```
-2. Confirm the `allow_origins` list includes the **exact deployed frontend URL** (including `https://` and no trailing slash).
-3. If the frontend URL is on a Vercel preview domain (e.g., `smartpress-git-main-xyz.vercel.app`), either:
-   - Add it to `allow_origins`, **or**
-   - Use the production custom domain and ensure CORS matches that.
-4. If a change is required, update the backend, rebuild the Docker image, and redeploy to Cloud Run.
-5. After redeploy, open the deployed frontend → DevTools → Network tab → find a failed/successful request and confirm no `CORS` error appears in the console.
-
-### Done When
-Backend Cloud Run logs and browser DevTools show no CORS rejection on a request from the deployed frontend origin.
-
----
-
-## ✅ Check 4 — Smoke Test
-
-**Risk:** Even if all three checks above pass, an end-to-end flow may still fail due to an unrelated runtime issue (e.g., FFmpeg not found in the container, temp directory permissions, missing env vars on the backend).
-
-This is the **final gate**. Do not skip it.
-
-### Steps
-
-1. Navigate to the deployed SmartPress frontend URL in a browser.
-2. Upload a sample file:
-   - For images: any `.jpg` or `.png` under 5 MB.
-   - For video: any `.mp4` under 20 MB.
-3. Trigger compression.
-4. Confirm the file processes without error.
-5. Download the compressed output.
-6. Verify the downloaded file opens correctly and is smaller than the original.
-7. Record the result in the log format below.
-
-### If the Smoke Test Fails
-Do **not** close Phase 1. Instead:
-- Capture the error message and/or browser console output.
-- Check Cloud Run logs for backend errors:
-  ```
-  gcloud run services logs read smartpress-backend --region=<your-region> --limit=50
-  ```
-- Log the failure in `Master.md` Review Log with the error detail.
-- Notify Claude and Comet with the log output for triage.
-
-### Done When
-One full upload → compress → download completes successfully. Result is logged in `Master.md`.
-
----
-
-## 📋 Smoke Test Log Template
-
-Copy this into the `Master.md` Review Log when the smoke test is run:
-
+```typescript
+export interface ProjectSync {
+  project: string;
+  repo: string;
+  branch: string;
+  stack: string;
+  status: "Active" | "In Progress" | "Maintenance" | "Complete";
+  priority: 1 | 2 | 3;
+  priority_label: string;
+  progress_percent: number;
+  progress_label: string;
+  current_phase: string;
+  next_step: string;
+  blocker: string | null;
+  live_url: string;
+  deploy_target: string;
+  agents: string[];
+  version: string;
+  last_push: {
+    timestamp: string;
+    actor: string;
+    commit_message: string;
+    sha: string;
+  };
+  last_updated: string;
+}
 ```
-| 2026-04-01 | AG (Antigravity) | Smoke Test — Phase 1 Runtime Verification |
-| Environment: [Local / Vercel + Cloud Run]
-| File tested: [filename, type, size]
-| Result: [PASS / FAIL]
-| Backend URL used: [https://...]
-| API route called: [POST /...]
-| CORS errors: [None / <error>]
-| Output file size: [original → compressed]
-| Notes: [any relevant detail]
+
+---
+
+### 2. CREATE — `src/app/api/projects/route.ts`
+
+Aggregate `PROJECT-SYNC.json` from all 7 repos in parallel using `Promise.allSettled`. Failed fetches must not break the response — return partial data with an error flag per repo.
+
+```typescript
+import { NextResponse } from "next/server";
+import { ProjectSync } from "@/types/project-sync";
+
+// Interim caching: revalidate every 5 minutes.
+// Sprint 2 will replace this with Supabase realtime once ratified.
+export const revalidate = 300;
+
+const REPOS = [
+  "namka-control",
+  "Odoo-POS-Terminal",
+  "SmartPress",
+  "Atlas-Website",
+  "Kora-Tutor",
+  "EventSaas",
+  "Odoo-BA-API",
+];
+
+const GITHUB_OWNER = "AliMora83";
+
+async function fetchProjectSync(repo: string): Promise<ProjectSync | null> {
+  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${repo}/contents/PROJECT-SYNC.json`;
+
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+      Accept: "application/vnd.github.v3.raw",
+    },
+    next: { revalidate: 300 },
+  });
+
+  if (!res.ok) {
+    console.error(`[api/projects] Failed to fetch ${repo}: ${res.status}`);
+    return null;
+  }
+
+  return res.json() as Promise<ProjectSync>;
+}
+
+export async function GET() {
+  const results = await Promise.allSettled(
+    REPOS.map((repo) => fetchProjectSync(repo))
+  );
+
+  const projects: ProjectSync[] = [];
+  const errors: string[] = [];
+
+  results.forEach((result, index) => {
+    if (result.status === "fulfilled" && result.value !== null) {
+      projects.push(result.value);
+    } else {
+      errors.push(REPOS[index]);
+    }
+  });
+
+  return NextResponse.json({
+    projects,
+    errors: errors.length > 0 ? errors : null,
+    fetched_at: new Date().toISOString(),
+  });
+}
 ```
+
+---
+
+### 3. MODIFY — `src/app/api/master/route.ts`
+
+Add a scope comment at the top of the file to make its governance-only role explicit and prevent future drift.
+
+Add this comment block immediately after the imports:
+
+```typescript
+/**
+ * /api/master — Governance data only.
+ *
+ * This route fetches Master.md from the namka-control repo and returns
+ * parsed governance metadata: version, current phase, last updated, and
+ * review log entries.
+ *
+ * It does NOT return project card data. Project card data is served by
+ * /api/projects which aggregates PROJECT-SYNC.json from all active repos.
+ *
+ * Do not add project portfolio data to this route.
+ */
+```
+
+---
+
+### 4. MODIFY — Dashboard component (project cards section)
+
+Wire the Dashboard's project card rendering to `/api/projects` instead of deriving project data from the `/api/master` parse.
+
+AG must:
+
+- Identify the component currently rendering project cards (likely in `src/app/page.tsx` or a `ProjectCard` / `Dashboard` component).
+- Add a `fetch("/api/projects")` call on the server side (Server Component) or via `useEffect` (Client Component) depending on current architecture.
+- Map `ProjectSync[]` to project card props.
+- Ensure each card renders at minimum: `project` name, `status`, `priority_label`, `progress_percent`, `next_step`, `blocker` (null = no badge), `live_url`, `last_updated`.
+- If `blocker` is not null, render a visible red indicator on the card.
+- If `/api/projects` returns an `errors` array (partial failure), render an `ErrorCard` placeholder for each failed repo — do not silently drop it.
+
+---
+
+### 5. VERIFY — `next.config.ts`
+
+Confirm `output: 'standalone'` is present. If missing, add it.
+
+```typescript
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  output: "standalone",
+};
+
+export default nextConfig;
+```
+
+---
+
+## ✅ Acceptance Gate
+
+AG must not mark this sprint COMPLETE until all of the following pass:
+
+| # | Check | Pass Condition |
+|---|---|---|
+| 1 | All 7 project cards render | Dashboard shows all 7 repos without blank cards |
+| 2 | Partial failure handled | Manually remove `GITHUB_TOKEN` temporarily — ErrorCard appears, no crash |
+| 3 | Caching active | `revalidate = 300` present in `/api/projects/route.ts` |
+| 4 | `/api/master` scoped | Governance comment block present in master route |
+| 5 | `blocker` badge | SmartPress card shows red indicator (blocker is non-null) |
+| 6 | TypeScript clean | `npm run build` passes with zero type errors |
+| 7 | `output: standalone` | Confirmed in `next.config.ts` |
 
 ---
 
 ## 🚫 Out of Scope for This Sprint
 
-Do **not** begin any of the following until Phase 1 is closed and Claude's Job Status UX designs are ready:
+AG must not implement any of the following — they belong to future sprints pending ratification:
 
-- Task 2.1 — Cloud Run Jobs Integration
-- Task 2.2 — Status Polling API
-- Task 2.3 — GCS Persistent Storage
-- Any Phase 3 work
-
----
-
-## 🔁 Handoff on Completion
-
-Once all 4 checks pass and the smoke test is logged:
-
-1. **AG** — Add the smoke test result to `Master.md` Review Log.
-2. **Comet** — Update `Master.md` to mark Phase 1 as `✅ CLOSED`.
-3. **Claude** — Deliver Job Status UX designs (`Queued → Processing → Finalizing → Completed → Failed`) as the Phase 2 gate asset.
-4. **All agents** — Phase 2 sprint planning begins only after the above three are done.
+- Supabase integration of any kind
+- Progress bar UI component
+- Zero-downtime deploy / health check endpoint
+- Lighthouse performance audit
+- Filter or sort controls
+- Any change to `Master.md`, `Master-Update.md`, or `AI-Logs.md` other than the execution report
 
 ---
 
-> This update was issued with full alignment between Claude and Comet.  
-> Any deviations from this scope require sign-off from both before implementation.
+## 📝 After Execution
+
+AG records outcomes in `AI-Logs.md` using this format:
+
+```md
+## AG Execution Log — Phase 3 Sprint 1
+
+- Date: YYYY-MM-DD
+- Status: COMPLETE | BLOCKED
+- Work order: AG-Update.md (Session 11)
+
+### Completed
+- [ ] `src/types/project-sync.ts` created
+- [ ] `src/app/api/projects/route.ts` created
+- [ ] `/api/master` scope comment added
+- [ ] Dashboard wired to `/api/projects`
+- [ ] `next.config.ts` verified
+
+### Acceptance Gate Results
+| Check | Result | Notes |
+|---|---|---|
+| All 7 cards render | ✅ / ❌ | |
+| Partial failure handled | ✅ / ❌ | |
+| Caching active | ✅ / ❌ | |
+| /api/master scoped | ✅ / ❌ | |
+| Blocker badge | ✅ / ❌ | |
+| TypeScript build clean | ✅ / ❌ | |
+| output: standalone | ✅ / ❌ | |
+
+### Blockers
+- None / [describe if any]
+
+### Next Step
+- Report back to Claude for Sprint 2 gate review.
+```

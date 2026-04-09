@@ -36,7 +36,7 @@ export default function Home() {
           {/* Version Number */}
           <div className="pt-2">
             <span className="text-[10px] md:text-xs font-bold text-slate-400 tracking-widest uppercase" style={{ fontFamily: 'var(--font-montserrat)' }}>
-              Version 1.0.1
+              Version 2.0.0
             </span>
           </div>
         </div>

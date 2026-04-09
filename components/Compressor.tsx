@@ -1,24 +1,124 @@
 
 "use client";
 
-import { useState, useRef, useEffect, DragEvent } from "react";
+import { useState, useRef, useEffect, useCallback, DragEvent } from "react";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile, toBlobURL } from "@ffmpeg/util";
-import { Upload, FileVideo, Download, Loader2, CheckCircle, Server, Monitor, X, Image as ImageIcon, Settings2 } from "lucide-react";
+import { Upload, FileVideo, Download, Loader2, CheckCircle, Server, Monitor, X, Image as ImageIcon, Settings2, RefreshCw, Clock, Cpu, Package, AlertCircle } from "lucide-react";
 import { get, set } from "idb-keyval";
+
+// --- Types ---
+
+type FileStatus = "pending" | "queued" | "processing" | "finalizing" | "done" | "error";
 
 interface FileItem {
     id: string;
     file: File;
-    status: "pending" | "compressing" | "done" | "error";
+    status: FileStatus;
     mode: "client" | "server";
     progress: number;
     preview?: string;
     downloadLink?: string;
-    errorMessage?: string; // Added for enhanced error handling
-    originalSize?: number; // Added for displaying compression metrics
-    newSize?: number; // Added for displaying compression metrics
+    errorMessage?: string;
+    originalSize?: number;
+    newSize?: number;
+    jobId?: string; // Phase 2: backend job ID for async polling
 }
+
+// Status label config for each state
+const STATUS_CONFIG: Record<FileStatus, { label: string; color: string; icon: typeof Clock }> = {
+    pending: { label: "Ready", color: "#6b7280", icon: Clock },
+    queued: { label: "Waiting in queue...", color: "#8b5cf6", icon: Clock },
+    processing: { label: "Compressing", color: "#3b82f6", icon: Cpu },
+    finalizing: { label: "Wrapping up...", color: "#f59e0b", icon: Package },
+    done: { label: "Done", color: "#10b981", icon: CheckCircle },
+    error: { label: "Failed", color: "#ef4444", icon: AlertCircle },
+};
+
+// --- Polling Hook ---
+
+function useJobPoller(
+    files: FileItem[],
+    setFiles: React.Dispatch<React.SetStateAction<FileItem[]>>,
+    apiUrl: string,
+) {
+    const intervalsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+
+    const startPolling = useCallback((jobId: string, fileId: string) => {
+        // Don't start if already polling this job
+        if (intervalsRef.current.has(jobId)) return;
+
+        const interval = setInterval(async () => {
+            try {
+                const res = await fetch(`${apiUrl}/status/${jobId}`);
+                if (!res.ok) {
+                    console.error(`[Poller] Status check failed for ${jobId}: ${res.status}`);
+                    return;
+                }
+
+                const job = await res.json();
+
+                setFiles(prev => prev.map(f => {
+                    if (f.id !== fileId) return f;
+
+                    const updatedFile: FileItem = { ...f };
+
+                    // Map server status to UI status
+                    switch (job.status) {
+                        case "queued":
+                            updatedFile.status = "queued";
+                            updatedFile.progress = 0;
+                            break;
+                        case "processing":
+                            updatedFile.status = "processing";
+                            updatedFile.progress = job.progress || 0;
+                            break;
+                        case "finalizing":
+                            updatedFile.status = "finalizing";
+                            updatedFile.progress = 99;
+                            break;
+                        case "completed":
+                            updatedFile.status = "done";
+                            updatedFile.progress = 100;
+                            updatedFile.downloadLink = job.download_url;
+                            updatedFile.newSize = job.new_size;
+                            updatedFile.originalSize = job.original_size;
+                            break;
+                        case "failed":
+                            updatedFile.status = "error";
+                            updatedFile.errorMessage = job.error || "Compression failed";
+                            break;
+                    }
+
+                    return updatedFile;
+                }));
+
+                // Stop polling on terminal states
+                if (job.status === "completed" || job.status === "failed") {
+                    clearInterval(interval);
+                    intervalsRef.current.delete(jobId);
+                }
+            } catch (err) {
+                console.error(`[Poller] Network error polling ${jobId}:`, err);
+            }
+        }, 2000); // Poll every 2 seconds
+
+        intervalsRef.current.set(jobId, interval);
+    }, [apiUrl, setFiles]);
+
+    // Cleanup all intervals on unmount
+    useEffect(() => {
+        return () => {
+            intervalsRef.current.forEach(interval => clearInterval(interval));
+            intervalsRef.current.clear();
+        };
+    }, []);
+
+    return { startPolling };
+}
+
+
+// --- Main Component ---
 
 export default function Compressor() {
     const [loaded, setLoaded] = useState(false);
@@ -30,6 +130,11 @@ export default function Compressor() {
     const [videoCrf, setVideoCrf] = useState(28);
     const [imageQuality, setImageQuality] = useState(15);
     const [showSettings, setShowSettings] = useState(false);
+
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+    // Initialize job poller
+    const { startPolling } = useJobPoller(files, setFiles, API_URL);
 
     // Load initial state and FFmpeg
     useEffect(() => {
@@ -46,7 +151,10 @@ export default function Compressor() {
                 // Re-generate object URLs for previews as they don't persist
                 const restoredFiles = await Promise.all(savedFiles.map(async (f: FileItem) => {
                     const preview = await generatePreview(f.file);
-                    return { ...f, preview, status: f.status === "compressing" ? "pending" : f.status };
+                    // Reset in-progress states to pending (they won't be recoverable)
+                    const status: FileStatus = (f.status === "queued" || f.status === "processing" || f.status === "finalizing")
+                        ? "pending" : f.status;
+                    return { ...f, preview, status };
                 }));
                 setFiles(restoredFiles);
             }
@@ -56,7 +164,7 @@ export default function Compressor() {
 
             ffmpeg.on("progress", ({ progress }) => {
                 setFiles(prev => {
-                    const processing = prev.find(f => f.status === "compressing" && f.mode === "client");
+                    const processing = prev.find(f => f.status === "processing" && f.mode === "client");
                     if (processing) {
                         return prev.map(f =>
                             f.id === processing.id ? { ...f, progress: Math.round(progress * 100) } : f
@@ -135,20 +243,23 @@ export default function Compressor() {
 
     const compressFile = async (fileItem: FileItem) => {
         setFiles(prev => prev.map(f =>
-            f.id === fileItem.id ? { ...f, status: "compressing", progress: 0, errorMessage: undefined } : f
+            f.id === fileItem.id ? { ...f, status: "queued" as FileStatus, progress: 0, errorMessage: undefined, jobId: undefined } : f
         ));
 
         try {
             if (fileItem.mode === "client") {
+                // Client-side: skip straight to processing
+                setFiles(prev => prev.map(f =>
+                    f.id === fileItem.id ? { ...f, status: "processing" as FileStatus } : f
+                ));
                 await compressLocally(fileItem);
             } else {
                 await compressOnServer(fileItem);
             }
         } catch (error) {
-            // Error handling is now more specific within compressOnServer
             console.error("Compression initiation error:", error);
             setFiles(prev => prev.map(f =>
-                f.id === fileItem.id ? { ...f, status: "error", errorMessage: (error instanceof Error ? error.message : 'An unexpected error occurred.') } : f
+                f.id === fileItem.id ? { ...f, status: "error" as FileStatus, errorMessage: (error instanceof Error ? error.message : 'An unexpected error occurred.') } : f
             ));
         }
     };
@@ -162,41 +273,32 @@ export default function Compressor() {
         await ffmpegRef.exec(["-i", fileItem.file.name, "-vf", "scale=1280:-1", "-q:v", imageQuality.toString(), outputName]);
 
         const data = await ffmpegRef.readFile(outputName);
-        /* eslint-disable @typescript-eslint/no-explicit-any */
-        const buffer = data;
+        const buffer = data as unknown as ArrayBuffer;
 
-        const downloadLink = URL.createObjectURL(new Blob([buffer as ArrayBuffer], { type: fileItem.file.type }));
+        const downloadLink = URL.createObjectURL(new Blob([buffer], { type: fileItem.file.type }));
         setFiles(prev => prev.map(f =>
             f.id === fileItem.id ? {
                 ...f,
-                status: "done",
+                status: "done" as FileStatus,
                 progress: 100,
                 downloadLink,
-                originalSize: fileItem.file.size, // For client-side, original size is known
-                newSize: buffer.byteLength, // New size is the buffer length
+                originalSize: fileItem.file.size,
+                newSize: buffer.byteLength,
             } : f
         ));
     };
 
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
     const compressOnServer = async (fileItem: FileItem) => {
         const formData = new FormData();
         formData.append("file", fileItem.file);
-        formData.append("crf", videoCrf.toString()); // Pass user CRF to backend
-
-        let simulatedProgress = 0;
-        const progressInterval = setInterval(() => {
-            simulatedProgress += 5;
-            if (simulatedProgress <= 95) {
-                setFiles(prev => prev.map(f =>
-                    f.id === fileItem.id ? { ...f, progress: simulatedProgress } : f
-                ));
-            }
-        }, 800);
+        formData.append("crf", videoCrf.toString());
 
         try {
-            const response = await fetch(`${API_URL}/compress-video`, { method: "POST", body: formData });
+            // Phase 2: Use async mode by default
+            const response = await fetch(`${API_URL}/compress-video?async=true`, {
+                method: "POST",
+                body: formData,
+            });
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
@@ -205,37 +307,41 @@ export default function Compressor() {
 
             const result = await response.json();
 
-            if (!result || typeof result.original_size !== 'number' || typeof result.new_size !== 'number') {
-                throw new Error("Backend returned invalid compression data");
+            if (response.status === 202 && result.job_id) {
+                // Async path — store job_id and start polling
+                setFiles(prev => prev.map(f =>
+                    f.id === fileItem.id ? { ...f, jobId: result.job_id, status: "queued" as FileStatus } : f
+                ));
+                startPolling(result.job_id, fileItem.id);
+            } else {
+                // Sync fallback path (shouldn't happen with async=true but just in case)
+                if (!result || typeof result.original_size !== 'number' || typeof result.new_size !== 'number') {
+                    throw new Error("Backend returned invalid compression data");
+                }
+                setFiles(prev => prev.map(f =>
+                    f.id === fileItem.id ? {
+                        ...f,
+                        status: "done" as FileStatus,
+                        progress: 100,
+                        downloadLink: result.download_url,
+                        originalSize: result.original_size,
+                        newSize: result.new_size,
+                    } : f
+                ));
             }
-
-            clearInterval(progressInterval);
-            setFiles(prev => prev.map(f =>
-                f.id === fileItem.id ? {
-                    ...f,
-                    status: "done",
-                    progress: 100,
-                    downloadLink: result.download_url,
-                    originalSize: result.original_size, // From backend
-                    newSize: result.new_size, // From backend
-                } : f
-            ));
         } catch (e: any) {
-            clearInterval(progressInterval);
             console.error("Video compression error:", e);
             let errorMessage = "An unexpected error occurred.";
 
             if (e instanceof Error) {
                 try {
-                    // Attempt to parse backend HTTPException detail
                     const errorData = JSON.parse(e.message);
                     if (errorData && typeof errorData === 'object' && errorData.detail) {
                         errorMessage = errorData.detail;
                     } else {
                         errorMessage = e.message;
                     }
-                } catch (parseError) {
-                    // If not JSON, use the raw error message
+                } catch {
                     errorMessage = e.message;
                 }
             } else if (typeof e === 'string') {
@@ -243,9 +349,18 @@ export default function Compressor() {
             }
 
             setFiles(prev => prev.map(f =>
-                f.id === fileItem.id ? { ...f, status: "error", errorMessage } : f
+                f.id === fileItem.id ? { ...f, status: "error" as FileStatus, errorMessage } : f
             ));
         }
+    };
+
+    const retryFile = (fileItem: FileItem) => {
+        // Reset to pending and re-trigger compression
+        setFiles(prev => prev.map(f =>
+            f.id === fileItem.id ? { ...f, status: "pending" as FileStatus, progress: 0, errorMessage: undefined, jobId: undefined } : f
+        ));
+        // Use setTimeout to let state update before re-triggering
+        setTimeout(() => compressFile({ ...fileItem, status: "pending" }), 100);
     };
 
     const removeFile = (id: string) => {
@@ -283,6 +398,98 @@ export default function Compressor() {
         const sizes = ["Bytes", "KB", "MB", "GB"];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+    };
+
+    // Helper to render the status indicator for each file
+    const renderStatusIndicator = (fileItem: FileItem) => {
+        const config = STATUS_CONFIG[fileItem.status];
+        const IconComponent = config.icon;
+
+        switch (fileItem.status) {
+            case "queued":
+                return (
+                    <div className="flex items-center gap-2 mt-2">
+                        <div className="relative flex h-3 w-3">
+                            <span
+                                className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
+                                style={{ backgroundColor: config.color }}
+                            />
+                            <span
+                                className="relative inline-flex rounded-full h-3 w-3"
+                                style={{ backgroundColor: config.color }}
+                            />
+                        </div>
+                        <span className="text-sm font-medium" style={{ color: config.color }}>
+                            {config.label}
+                        </span>
+                    </div>
+                );
+
+            case "processing":
+                return (
+                    <div className="mb-2">
+                        <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                            <div
+                                className="h-full transition-all duration-500 ease-out"
+                                style={{
+                                    width: `${fileItem.progress}%`,
+                                    background: `linear-gradient(90deg, #3b82f6, #6366f1)`,
+                                }}
+                            />
+                        </div>
+                        <div className="flex items-center justify-between mt-1">
+                            <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: config.color }}>
+                                {fileItem.progress}% {config.label}
+                            </p>
+                            <Cpu size={12} className="animate-pulse" style={{ color: config.color }} />
+                        </div>
+                    </div>
+                );
+
+            case "finalizing":
+                return (
+                    <div className="mb-2">
+                        <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                            <div
+                                className="h-full animate-pulse"
+                                style={{
+                                    width: "100%",
+                                    background: `linear-gradient(90deg, #f59e0b, #eab308)`,
+                                }}
+                            />
+                        </div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider mt-1" style={{ color: config.color }}>
+                            {config.label}
+                        </p>
+                    </div>
+                );
+
+            case "done":
+                return (
+                    fileItem.originalSize && fileItem.newSize ? (
+                        <div className="flex items-center gap-2 mt-2 text-gray-500">
+                            <CheckCircle size={14} className="text-green-500" />
+                            <span className="text-sm">Compressed</span>
+                            <span className="text-sm">→</span>
+                            <span className="text-sm font-bold text-green-700">{formatBytes(fileItem.newSize)}</span>
+                            <span className="text-xs font-bold bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
+                                -{Math.round((1 - fileItem.newSize / fileItem.originalSize) * 100)}%
+                            </span>
+                        </div>
+                    ) : null
+                );
+
+            case "error":
+                return (
+                    <div className="bg-red-50 text-red-700 text-xs px-3 py-1.5 rounded-md font-medium mt-2 flex items-center gap-2">
+                        <AlertCircle size={14} />
+                        <span>Error: {fileItem.errorMessage}</span>
+                    </div>
+                );
+
+            default:
+                return null;
+        }
     };
 
     return (
@@ -439,43 +646,25 @@ export default function Compressor() {
                                                 <span className="text-xs text-gray-500">{formatBytes(fileItem.file.size)}</span>
                                             </div>
 
-                                            {fileItem.status === "compressing" && (
-                                                <div className="mb-2">
-                                                    <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-                                                        <div
-                                                            className="bg-blue-600 h-full transition-all duration-300"
-                                                            style={{ width: `${fileItem.progress}%` }}
-                                                        />
-                                                    </div>
-                                                    <p className="text-[10px] font-bold text-blue-600 mt-1 uppercase tracking-wider">{fileItem.progress}% processing</p>
-                                                </div>
-                                            )}
+                                            {/* Status Indicator — Phase 2 rich states */}
+                                            {renderStatusIndicator(fileItem)}
 
-                                            {fileItem.status === "error" && fileItem.errorMessage && (
-                                                <div className="bg-red-50 text-red-700 text-xs px-3 py-1.5 rounded-md font-medium mt-2">
-                                                    Error: {fileItem.errorMessage}
-                                                </div>
-                                            )}
-
-                                            {fileItem.status === "done" && fileItem.originalSize && fileItem.newSize && (
-                                                <div className="flex items-center gap-2 mt-2 text-gray-500">
-                                                    <CheckCircle size={14} className="text-green-500" />
-                                                    <span className="text-sm">Compressed</span>
-                                                    <span className="text-sm">→</span>
-                                                    <span className="text-sm font-bold text-green-700">{formatBytes(fileItem.newSize)}</span>
-                                                    <span className="text-xs font-bold bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
-                                                        -{Math.round((1 - fileItem.newSize / fileItem.originalSize) * 100)}%
-                                                    </span>
-                                                </div>
-                                            )}
-
-                                            <div className="flex gap-2">
+                                            {/* Action Buttons */}
+                                            <div className="flex gap-2 mt-2">
                                                 {fileItem.status === "pending" && (
                                                     <button
                                                         onClick={() => compressFile(fileItem)}
                                                         className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded transition font-bold uppercase tracking-wider"
                                                     >
                                                         Compress
+                                                    </button>
+                                                )}
+                                                {fileItem.status === "error" && (
+                                                    <button
+                                                        onClick={() => retryFile(fileItem)}
+                                                        className="text-xs bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded transition font-bold uppercase tracking-wider inline-flex items-center gap-1"
+                                                    >
+                                                        <RefreshCw size={12} /> Retry
                                                     </button>
                                                 )}
                                                 {fileItem.status === "done" && fileItem.downloadLink && (

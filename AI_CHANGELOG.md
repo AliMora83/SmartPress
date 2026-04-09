@@ -5,6 +5,18 @@
 
 ---
 
+## 2026-04-09 | Phase 2 Asynchronous Leap Implementation | AG (Antigravity)
+- **Architecture:** Transitioned from synchronous FFmpeg processing to an asynchronous job-based architecture using `BackgroundTasks` and an in-memory UUID `job_store` (TTL 1hr).
+- **Backend Infrastructure:** Implemented dual-mode `/compress-video` (`?async=true|false`), `/status/{job_id}` polling endpoint, and a new storage abstraction layer (`storage.py`) supporting both GCS (Production) and Local Filesystem (Dev).
+- **Frontend Refactor:** Replaced the simulated progress interval in `Compressor.tsx` with real-time polling logic (`useJobPoller`), integrating rich lifecycle states (`Queued`, `Processing` with real %, `Finalizing`, `Done`, `Failed`).
+- **Resilience:** Extracted inline FFmpeg calls into `compression_worker.py` utilizing `ffprobe` for accurate progress calculation and robust subprocess stderr parsing for structured error handling.
+- **Validation:** 
+  - Successful e2e async smoke test using `Test Video.mp4`: 3.09 MB → 760 KB (76% reduction) in ~5 seconds.
+  - Phase 1 synchronous path preserved seamlessly for backward compatibility.
+- **Status:** **Phase 2 Development Complete**. (GCS and Cloud Run deployment awaiting GCP billing reactivation).
+
+---
+
 ## 2026-04-02 | Phase 1 MVP Stabilized | AG (Antigravity)
 - **Runtime Verification:** Successfully performed smoke test using `Test-Video.mp4`. Output: 1.36 MB → 211.06 KB (85% reduction).
 - **Infrastructure:** Updated backend CORS and frontend API route alignment for local development.

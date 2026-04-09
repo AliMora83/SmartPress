@@ -53,11 +53,11 @@ At minimum, the following must work in at least one verified environment (local 
 - [x] **Task 1.3** — Structured Error Schema: Map FFmpeg exit codes to the canonical JSON error model (`CORRUPT_MEDIA`, `FILE_TOO_LARGE`, `UNSUPPORTED_FORMAT`, `FFMPEG_TIMEOUT`, etc.). See `Error Handling` file.
 - [x] **Phase 1 Runtime Verification**: Resolved syntax errors and performed a successful smoke test with `Test-Video.mp4`.
 
-**Phase 1 Status: ✅ CLOSED**
+**Phase 1 Status: ✅ CLOSED (Stable MVP)**
 
 ---
 
-### Phase 2 🔄 The Asynchronous Leap
+### Phase 2 🔄 The Asynchronous Leap (Active)
 
 *Focus: Decoupling compute from the API while staying usable throughout.*
 
@@ -69,13 +69,15 @@ At minimum, the following must work in at least one verified environment (local 
 
 **Tasks**
 
-- [ ] **Task 2.1** — Cloud Run Jobs Integration: Move heavy FFmpeg execution out of the main API container into **Cloud Run Jobs**.
-- [ ] **Task 2.2** — Status Polling API:
+- [ ] **Task 2.1** — Cloud Run Jobs Integration: Move heavy FFmpeg execution out of the main API container into **Cloud Run Jobs**. (Deferred to Phase 3 infrastructure updates — using BackgroundTasks currently).
+- [x] **Task 2.2** — Status Polling API:
   - Implement `/status/{job_id}` endpoint.
   - Frontend transitions from a single “waiting” state to progress-tracking states:
     - `Queued`, `Processing`, `Finalizing`, `Completed`, `Failed`.
-- [ ] **Task 2.3** — Persistent Storage (GCS):
-  - Replace `temp_uploads` and `temp_processed` local directories with **Google Cloud Storage** buckets for durability and scaling.
+- [x] **Task 2.3** — Persistent Storage (GCS):
+  - Replace `temp_uploads` and `temp_processed` local directories with **Google Cloud Storage** buckets for durability and scaling. (Added abstraction layer with local fallback).
+
+**Phase 2 Status: ✅ DEVELOPMENT COMPLETE / AWAITING GCP BILLING FOR DEPLOY**
 
 **Phase 2 Runtime Rule**
 
