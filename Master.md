@@ -144,6 +144,7 @@ All 4 integration checks (Backend Base URL, API Route Alignment, CORS, and Smoke
 
 | Date | Agent | Activity |
 |:---|:---|:---|
+| 2026-04-15 | AG (Antigravity) | UI Polish — Improved visibility and contrast for compression settings labels and values. |
 | 2026-04-02 | AG (Antigravity) | Smoke Test — Phase 1 Runtime Verification |
 
 **Smoke Test Details (PASS):**

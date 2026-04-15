@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-04-15 | UI Polish & Visibility Improvements | AG (Antigravity)
+- **UI/UX Refinement:** Updated CSS classes for compression settings (CRF and Image Quality sliders). Modified labels and numerical value indicators to increase contrast and readability against the gray background by using bolder typography, darker colors (`text-gray-800`), and subtle dynamic shadows.
+
+---
+
 ## 2026-04-09 | Phase 2 Asynchronous Leap Implementation | AG (Antigravity)
 - **Architecture:** Transitioned from synchronous FFmpeg processing to an asynchronous job-based architecture using `BackgroundTasks` and an in-memory UUID `job_store` (TTL 1hr).
 - **Backend Infrastructure:** Implemented dual-mode `/compress-video` (`?async=true|false`), `/status/{job_id}` polling endpoint, and a new storage abstraction layer (`storage.py`) supporting both GCS (Production) and Local Filesystem (Dev).

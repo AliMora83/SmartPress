@@ -276,7 +276,7 @@ export default function Compressor() {
         /* eslint-disable @typescript-eslint/no-explicit-any */
         const buffer = data instanceof Uint8Array ? data : new Uint8Array(data as unknown as ArrayBuffer);
 
-        const downloadLink = URL.createObjectURL(new Blob([buffer], { type: fileItem.file.type }));
+        const downloadLink = URL.createObjectURL(new Blob([buffer as any], { type: fileItem.file.type }));
         setFiles(prev => prev.map(f =>
             f.id === fileItem.id ? {
                 ...f,
@@ -542,14 +542,14 @@ export default function Compressor() {
                                 <div className="space-y-3">
                                     <div className="flex justify-between items-center">
                                         <label className="text-sm font-bold text-gray-700">Video Quality (CRF)</label>
-                                        <span className="text-xs font-mono bg-white px-2 py-1 rounded border">{videoCrf}</span>
+                                        <span className="text-sm font-mono font-bold text-gray-800 bg-white px-2 py-1 rounded border shadow-sm">{videoCrf}</span>
                                     </div>
                                     <input
                                         type="range" min="18" max="35" step="1"
                                         value={videoCrf} onChange={(e) => setVideoCrf(parseInt(e.target.value))}
                                         className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                                     />
-                                    <div className="flex justify-between text-[10px] text-gray-400 font-medium">
+                                    <div className="flex justify-between text-[11px] text-gray-700 font-bold tracking-wide">
                                         <span>HIGH QUALITY (18)</span>
                                         <span>SMALL FILE (35)</span>
                                     </div>
@@ -558,14 +558,14 @@ export default function Compressor() {
                                 <div className="space-y-3">
                                     <div className="flex justify-between items-center">
                                         <label className="text-sm font-bold text-gray-700">Image Quality</label>
-                                        <span className="text-xs font-mono bg-white px-2 py-1 rounded border">{imageQuality}</span>
+                                        <span className="text-sm font-mono font-bold text-gray-800 bg-white px-2 py-1 rounded border shadow-sm">{imageQuality}</span>
                                     </div>
                                     <input
                                         type="range" min="1" max="31" step="1"
                                         value={imageQuality} onChange={(e) => setImageQuality(parseInt(e.target.value))}
                                         className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                                     />
-                                    <div className="flex justify-between text-[10px] text-gray-400 font-medium">
+                                    <div className="flex justify-between text-[11px] text-gray-700 font-bold tracking-wide">
                                         <span>BEST (1)</span>
                                         <span>SMALLEST (31)</span>
                                     </div>
