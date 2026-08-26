@@ -1,6 +1,6 @@
 {
-  "name": "smart-compressor",
-  "version": "0.1.0",
+  "name": "smartpress",
+  "version": "3.0.0-alpha.1",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -9,8 +9,6 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@ffmpeg/ffmpeg": "^0.12.15",
-    "@ffmpeg/util": "^0.12.2",
     "clsx": "^2.1.1",
     "idb-keyval": "^6.2.2",
     "lucide-react": "^0.563.0",
