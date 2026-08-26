@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, DragEvent } from "react";
-import { Upload, FileVideo, Download, CheckCircle, Server, Monitor, X, Image as ImageIcon, Settings2, RefreshCw, Clock, Cpu, Package, AlertCircle } from "lucide-react";
+import { Upload, FileVideo, Download, CheckCircle, MinusCircle, Server, Monitor, X, Image as ImageIcon, Settings2, RefreshCw, Clock, Cpu, Package, AlertCircle } from "lucide-react";
 import { get, set } from "idb-keyval";
 
 const ACCEPTED_TYPES = ["image/jpeg", "image/png"];
@@ -545,10 +545,19 @@ export default function Compressor() {
 
             case "done":
                 if (fileItem.alreadyOptimal) {
+                    // Quiet, secondary state: nothing changed, so this must not read as a
+                    // successful compression.
                     return (
-                        <div className="flex items-center gap-2 mt-2 text-gray-500">
-                            <CheckCircle size={14} className="text-green-500" />
-                            <span className="text-sm">Already optimal — kept the original</span>
+                        <div className="flex flex-col gap-1 mt-2">
+                            <div className="flex items-center gap-2 text-gray-500">
+                                <MinusCircle size={14} className="text-gray-400" />
+                                <span className="text-sm">No size reduction — original kept</span>
+                            </div>
+                            {fileItem.file.type === "image/png" && (
+                                <span className="text-xs text-gray-400">
+                                    PNG compression arrives in the next update.
+                                </span>
+                            )}
                         </div>
                     );
                 }
@@ -738,13 +747,23 @@ export default function Compressor() {
                                                     </button>
                                                 )}
                                                 {fileItem.status === "done" && fileItem.downloadLink && (
-                                                    <a
-                                                        href={fileItem.downloadLink}
-                                                        download={`smartpress_${fileItem.file.name}`}
-                                                        className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded transition inline-flex items-center gap-1 font-bold uppercase tracking-wider"
-                                                    >
-                                                        <Download size={14} /> Download
-                                                    </a>
+                                                    fileItem.alreadyOptimal ? (
+                                                        <a
+                                                            href={fileItem.downloadLink}
+                                                            download={outputName(fileItem)}
+                                                            className="text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2 transition inline-flex items-center gap-1 font-medium"
+                                                        >
+                                                            <Download size={12} /> Download original
+                                                        </a>
+                                                    ) : (
+                                                        <a
+                                                            href={fileItem.downloadLink}
+                                                            download={outputName(fileItem)}
+                                                            className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded transition inline-flex items-center gap-1 font-bold uppercase tracking-wider"
+                                                        >
+                                                            <Download size={14} /> Download
+                                                        </a>
+                                                    )
                                                 )}
                                             </div>
                                         </div>
