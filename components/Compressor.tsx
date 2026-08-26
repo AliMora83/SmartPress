@@ -404,31 +404,25 @@ export default function Compressor() {
         }
     };
 
+    // Only prefix files SmartPress actually changed.
+    const outputName = (fileItem: FileItem) =>
+        fileItem.alreadyOptimal ? fileItem.file.name : `smartpress_${fileItem.file.name}`;
+
     const downloadAll = () => {
-        const completedFiles = files.filter(f => f.status === "done" && f.downloadLink);
-        
-        if (completedFiles.length > 3) {
-            const fileNames = completedFiles.map(f => `smartpress_${f.file.name}`).join(',');
-            const batchDownloadUrl = `${API_URL}/download-batch?files=${encodeURIComponent(fileNames)}`;
-            
-            const link = document.createElement('a');
-            link.href = batchDownloadUrl;
-            link.download = 'smartpress_batch.zip';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        } else {
-            completedFiles.forEach((fileItem, index) => {
+        // Every download is a local blob. There is no backend and no batch endpoint;
+        // the old >3-file /download-batch path resolved against the origin and 404'd.
+        files
+            .filter(f => f.status === "done" && f.downloadLink)
+            .forEach((fileItem, index) => {
                 setTimeout(() => {
                     const link = document.createElement('a');
                     link.href = fileItem.downloadLink!;
-                    link.download = `smartpress_${fileItem.file.name}`;
+                    link.download = outputName(fileItem);
                     document.body.appendChild(link);
                     link.click();
                     document.body.removeChild(link);
                 }, index * 300);
             });
-        }
     };
 
     const formatBytes = (bytes: number) => {
