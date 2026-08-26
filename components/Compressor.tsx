@@ -149,6 +149,25 @@ export default function Compressor() {
     // Initialize job poller
     const { startPolling } = useJobPoller(files, setFiles, API_URL);
 
+    // --- Blob URL lifetime ---
+    // Object URLs are created once, when a result is produced, and stored on the file
+    // item. They are revoked only on row removal, queue clear, and unmount -- never on
+    // re-render, or a URL could die between render and click.
+    const revokedRef = useRef<Set<string>>(new Set());
+    const revokeLink = useCallback((url?: string) => {
+        if (!url || !url.startsWith("blob:")) return;
+        if (revokedRef.current.has(url)) return; // guard double-revoke
+        revokedRef.current.add(url);
+        URL.revokeObjectURL(url);
+    }, []);
+
+    // Mirror files into a ref so the unmount cleanup does not re-run on every change.
+    const filesRef = useRef<FileItem[]>([]);
+    useEffect(() => { filesRef.current = files; }, [files]);
+    useEffect(() => () => {
+        filesRef.current.forEach(f => revokeLink(f.downloadLink));
+    }, [revokeLink]);
+
     // Restore persisted state. Nothing here gates the dropzone.
     useEffect(() => {
         const load = async () => {
@@ -164,10 +183,19 @@ export default function Compressor() {
                 // Re-generate object URLs for previews as they don't persist
                 const restoredFiles = await Promise.all(savedFiles.map(async (f: FileItem) => {
                     const preview = await generatePreview(f.file);
-                    // Reset in-progress states to pending (they won't be recoverable)
-                    const status: FileStatus = (f.status === "queued" || f.status === "processing" || f.status === "finalizing")
-                        ? "pending" : f.status;
-                    return { ...f, preview, status };
+                    // A blob URL from a previous page session is already dead, so a
+                    // restored "done" row cannot be downloaded. Reset it to pending
+                    // rather than offering a link that 404s.
+                    const status: FileStatus = f.status === "error" ? "error" : "pending";
+                    return {
+                        ...f,
+                        preview,
+                        status,
+                        progress: 0,
+                        downloadLink: undefined,
+                        newSize: undefined,
+                        alreadyOptimal: undefined,
+                    };
                 }));
                 setFiles(restoredFiles);
             }
@@ -177,10 +205,11 @@ export default function Compressor() {
         load();
     }, []);
 
-    // Persist files when they change
+    // Persist files when they change. Blob URLs are deliberately not persisted --
+    // they are only valid for the page session that created them.
     useEffect(() => {
         if (loaded) {
-            set("smartpress_files", files);
+            set("smartpress_files", files.map(f => ({ ...f, downloadLink: undefined })));
         }
     }, [files, loaded]);
 
@@ -237,9 +266,20 @@ export default function Compressor() {
     };
 
     const compressFile = async (fileItem: FileItem) => {
-        setFiles(prev => prev.map(f =>
-            f.id === fileItem.id ? { ...f, status: "queued" as FileStatus, progress: 0, errorMessage: undefined, jobId: undefined } : f
-        ));
+        setFiles(prev => prev.map(f => {
+            if (f.id !== fileItem.id) return f;
+            // Recompressing replaces the result, so release the previous blob first.
+            revokeLink(f.downloadLink);
+            return {
+                ...f,
+                status: "queued" as FileStatus,
+                progress: 0,
+                errorMessage: undefined,
+                jobId: undefined,
+                downloadLink: undefined,
+                alreadyOptimal: undefined,
+            };
+        }));
 
         try {
             setFiles(prev => prev.map(f =>
@@ -390,11 +430,17 @@ export default function Compressor() {
     };
 
     const removeFile = (id: string) => {
-        setFiles(prev => prev.filter(f => f.id !== id));
+        setFiles(prev => {
+            prev.filter(f => f.id === id).forEach(f => revokeLink(f.downloadLink));
+            return prev.filter(f => f.id !== id);
+        });
     };
 
     const clearAll = () => {
-        setFiles([]);
+        setFiles(prev => {
+            prev.forEach(f => revokeLink(f.downloadLink));
+            return [];
+        });
     };
 
     const compressAll = async () => {
