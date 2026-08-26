@@ -24,7 +24,9 @@ jobs:
           TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
           TODAY=$(date -u '+%Y-%m-%d')
           ACTOR="${{ github.actor }}"
-          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          # Subject line only, JSON-escaped. Interpolating the raw message put literal
+          # newlines inside a JSON string and produced an unparseable file.
+          COMMIT_MSG_JSON=$(git log -1 --pretty=%s | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.stringify(s.replace(/\n+$/,''))))")
           SHORT_SHA="${{ github.sha }}"
           SHORT_SHA="${SHORT_SHA:0:7}"
           VERSION=$(node -p "require('./package.json').version")
@@ -50,7 +52,7 @@ jobs:
             "last_push": {
               "timestamp": "$TIMESTAMP",
               "actor": "$ACTOR",
-              "commit_message": "$COMMIT_MSG",
+              "commit_message": $COMMIT_MSG_JSON,
               "sha": "$SHORT_SHA"
             },
             "last_updated": "$TODAY"
@@ -58,7 +60,9 @@ jobs:
           ENDJSON
 
           sed -i 's/^          //' PROJECT-SYNC.json
-          echo "PROJECT-SYNC.json generated."
+          # Never commit a file the dashboard cannot parse.
+          node -e "JSON.parse(require('fs').readFileSync('PROJECT-SYNC.json','utf8'))"
+          echo "PROJECT-SYNC.json generated and validated."
 
       - name: Commit PROJECT-SYNC.json
         run: |

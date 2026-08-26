@@ -14,30 +14,12 @@
   "live_url": "https://smartpress.namka.cloud",
   "deploy_target": "Static frontend — namka.cloud",
   "agents": ["Claude", "Comet"],
-  "version": "3.0.0-alpha.1",
+  "version": "3.0.0-alpha.2",
   "last_push": {
-    "timestamp": "2026-08-26T18:34:47Z",
+    "timestamp": "2026-08-26T19:06:45Z",
     "actor": "AliMora83",
-    "commit_message": "docs: reconcile project docs with v3 plan
-
-Adds SmartPress-v3-Plan.md as plan of record and CLAUDE.md as the
-working rules for agents. Deletes AGENT-ONBOARDING.md: it was a
-hand-rolled version of a convention Claude Code already has, and
-nothing enforced it -- which is why its broken AI_CHANGELOG.md pointer
-survived so long.
-
-Master.md swaps the v2 build phases for the v3 Phase 1-3 structure,
-keeping the Always-On Constraint verbatim with a noted amendment (the
-backend health-check clause no longer applies). README and DEPLOY drop
-Vercel, Cloud Run, Netlify and backend setup in favour of client-side
-only. AI-Logs.md gains the Sprint 1.1 entry.
-
-PROJECT-SYNC.json is CI-generated, so the generating workflow is fixed
-too -- otherwise the next push would regenerate the stale values. It now
-reads the version from package.json instead of grepping Master.md.
-
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
-    "sha": "5e7d30c"
+    "commit_message": "feat: quiet no-gain state, no prefix on unchanged files",
+    "sha": "77dcc02"
   },
   "last_updated": "2026-08-26"
 }
