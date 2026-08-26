@@ -2,10 +2,10 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, DragEvent } from "react";
-import { FFmpeg } from "@ffmpeg/ffmpeg";
-import { fetchFile, toBlobURL } from "@ffmpeg/util";
-import { Upload, FileVideo, Download, Loader2, CheckCircle, Server, Monitor, X, Image as ImageIcon, Settings2, RefreshCw, Clock, Cpu, Package, AlertCircle } from "lucide-react";
+import { Upload, FileVideo, Download, CheckCircle, Server, Monitor, X, Image as ImageIcon, Settings2, RefreshCw, Clock, Cpu, Package, AlertCircle } from "lucide-react";
 import { get, set } from "idb-keyval";
+
+const ACCEPTED_TYPES = ["image/jpeg", "image/png"];
 
 // --- Types ---
 
@@ -23,6 +23,7 @@ interface FileItem {
     remediation?: string;
     originalSize?: number;
     newSize?: number;
+    alreadyOptimal?: boolean;
     jobId?: string; // Phase 2: backend job ID for async polling
 }
 
@@ -133,7 +134,6 @@ function useJobPoller(
 
 export default function Compressor() {
     const [loaded, setLoaded] = useState(false);
-    const [ffmpegRef, setFfmpegRef] = useState<FFmpeg | null>(null);
     const [files, setFiles] = useState<FileItem[]>([]);
     const [dragActive, setDragActive] = useState(false);
 
@@ -142,12 +142,14 @@ export default function Compressor() {
     const [imageQuality, setImageQuality] = useState(15);
     const [showSettings, setShowSettings] = useState(false);
 
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api-backend";
+    // No backend exists. Only the unreachable server path below still reads this;
+    // Sprint 1.3 deletes that code and this along with it.
+    const API_URL = "";
 
     // Initialize job poller
     const { startPolling } = useJobPoller(files, setFiles, API_URL);
 
-    // Load initial state and FFmpeg
+    // Restore persisted state. Nothing here gates the dropzone.
     useEffect(() => {
         const load = async () => {
             // Restore settings from IDB
@@ -170,26 +172,6 @@ export default function Compressor() {
                 setFiles(restoredFiles);
             }
 
-            const ffmpeg = new FFmpeg();
-            const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
-
-            ffmpeg.on("progress", ({ progress }) => {
-                setFiles(prev => {
-                    const processing = prev.find(f => f.status === "processing" && f.mode === "client");
-                    if (processing) {
-                        return prev.map(f =>
-                            f.id === processing.id ? { ...f, progress: Math.round(progress * 100) } : f
-                        );
-                    }
-                    return prev;
-                });
-            });
-
-            await ffmpeg.load({
-                coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-                wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
-            });
-            setFfmpegRef(ffmpeg);
             setLoaded(true);
         };
         load();
@@ -222,14 +204,16 @@ export default function Compressor() {
         const newFiles: FileItem[] = [];
         for (let i = 0; i < uploadedFiles.length; i++) {
             const file = uploadedFiles[i];
-            const preview = await generatePreview(file);
+            // Drop events bypass the input's accept filter, so validate here too.
+            const supported = ACCEPTED_TYPES.includes(file.type);
             newFiles.push({
                 id: `${Date.now()}-${i}`,
                 file,
-                status: "pending",
-                mode: file.type.startsWith("video") ? "server" : "client",
+                status: supported ? "pending" : "error",
+                mode: "client",
                 progress: 0,
-                preview,
+                preview: supported ? await generatePreview(file) : undefined,
+                errorMessage: supported ? undefined : "Unsupported file type — SmartPress accepts JPEG and PNG.",
             });
         }
         setFiles(prev => [...prev, ...newFiles]);
@@ -258,15 +242,10 @@ export default function Compressor() {
         ));
 
         try {
-            if (fileItem.mode === "client") {
-                // Client-side: skip straight to processing
-                setFiles(prev => prev.map(f =>
-                    f.id === fileItem.id ? { ...f, status: "processing" as FileStatus } : f
-                ));
-                await compressLocally(fileItem);
-            } else {
-                await compressOnServer(fileItem);
-            }
+            setFiles(prev => prev.map(f =>
+                f.id === fileItem.id ? { ...f, status: "processing" as FileStatus } : f
+            ));
+            await compressLocally(fileItem);
         } catch (error) {
             console.error("Compression initiation error:", error);
             setFiles(prev => prev.map(f =>
@@ -275,27 +254,35 @@ export default function Compressor() {
         }
     };
 
+    // Temporary canvas bridge — replaced by the wasm codec layer in Sprint 1.3.
+    // The slider keeps its legacy 1..31 range (1 = best); canvas wants 0..1.
+    const toCanvasQuality = (q: number) => 0.95 - ((q - 1) / 30) * 0.65;
+
     const compressLocally = async (fileItem: FileItem) => {
-        if (!ffmpegRef) return;
-        const outputName = `smartpress_${fileItem.file.name}`;
-        await ffmpegRef.writeFile(fileItem.file.name, await fetchFile(fileItem.file));
+        const type = fileItem.file.type;
+        // imageOrientation is load-bearing: without it EXIF-rotated photos come out sideways.
+        const bitmap = await createImageBitmap(fileItem.file, { imageOrientation: "from-image" });
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("Could not get a 2D drawing context");
+        ctx.drawImage(bitmap, 0, 0);
+        bitmap.close();
 
-        // Use user-defined image quality
-        await ffmpegRef.exec(["-i", fileItem.file.name, "-vf", "scale=1280:-1", "-q:v", imageQuality.toString(), outputName]);
+        const blob = await canvas.convertToBlob({ type, quality: toCanvasQuality(imageQuality) });
 
-        const data = await ffmpegRef.readFile(outputName);
-        /* eslint-disable @typescript-eslint/no-explicit-any */
-        const buffer = data instanceof Uint8Array ? data : new Uint8Array(data as unknown as ArrayBuffer);
+        // Canvas PNG often grows the file. Never ship output bigger than the input.
+        const optimal = blob.size >= fileItem.file.size;
+        const output = optimal ? fileItem.file : blob;
 
-        const downloadLink = URL.createObjectURL(new Blob([buffer as any], { type: fileItem.file.type }));
         setFiles(prev => prev.map(f =>
             f.id === fileItem.id ? {
                 ...f,
                 status: "done" as FileStatus,
                 progress: 100,
-                downloadLink,
+                downloadLink: URL.createObjectURL(output),
                 originalSize: fileItem.file.size,
-                newSize: buffer.byteLength,
+                newSize: output.size,
+                alreadyOptimal: optimal,
             } : f
         ));
     };
@@ -368,7 +355,7 @@ export default function Compressor() {
                     } : f
                 ));
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
             console.error("Video compression error:", e);
             let errorMessage = "An unexpected error occurred.";
 
@@ -517,6 +504,14 @@ export default function Compressor() {
                 );
 
             case "done":
+                if (fileItem.alreadyOptimal) {
+                    return (
+                        <div className="flex items-center gap-2 mt-2 text-gray-500">
+                            <CheckCircle size={14} className="text-green-500" />
+                            <span className="text-sm">Already optimal — kept the original</span>
+                        </div>
+                    );
+                }
                 return (
                     fileItem.originalSize && fileItem.newSize ? (
                         <div className="flex items-center gap-2 mt-2 text-gray-500">
@@ -557,8 +552,7 @@ export default function Compressor() {
             <div className="w-full max-w-4xl mx-auto space-y-6">
 
                 {/* Upload Area */}
-                {loaded && (
-                    <div className="space-y-4">
+                <div className="space-y-4">
                         <div
                             className={`border-2 border-dashed rounded-xl p-12 flex flex-col items-center justify-center cursor-pointer transition-all ${dragActive ? "border-blue-500 bg-blue-50 scale-105" : "border-gray-300 hover:bg-blue-50 hover:border-blue-400"
                                 }`}
@@ -573,13 +567,13 @@ export default function Compressor() {
                                 {dragActive ? "Drop files here" : "Click or drag files to upload"}
                             </p>
                             <p className="text-sm text-gray-400 mt-2 text-center">
-                                Images (JPG, PNG) • Videos (MP4) • Multiple files supported
+                                Images (JPG, PNG) • Multiple files supported
                             </p>
                             <input
                                 id="file-upload"
                                 type="file"
                                 className="hidden"
-                                accept="image/*,video/*"
+                                accept="image/jpeg,image/png"
                                 multiple
                                 onChange={(e) => handleFileSelect(e.target.files)}
                             />
@@ -597,23 +591,7 @@ export default function Compressor() {
 
                         {/* Settings Panel */}
                         {showSettings && (
-                            <div className="bg-gray-50 rounded-xl p-6 grid grid-cols-1 md:grid-cols-2 gap-8 border border-gray-100">
-                                <div className="space-y-3">
-                                    <div className="flex justify-between items-center">
-                                        <label className="text-sm font-bold text-gray-700">Video Quality (CRF)</label>
-                                        <span className="text-sm font-mono font-bold text-gray-800 bg-white px-2 py-1 rounded border shadow-sm">{videoCrf}</span>
-                                    </div>
-                                    <input
-                                        type="range" min="18" max="35" step="1"
-                                        value={videoCrf} onChange={(e) => setVideoCrf(parseInt(e.target.value))}
-                                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                                    />
-                                    <div className="flex justify-between text-[11px] text-gray-700 font-bold tracking-wide">
-                                        <span>HIGH QUALITY (18)</span>
-                                        <span>SMALL FILE (35)</span>
-                                    </div>
-                                </div>
-
+                            <div className="bg-gray-50 rounded-xl p-6 border border-gray-100">
                                 <div className="space-y-3">
                                     <div className="flex justify-between items-center">
                                         <label className="text-sm font-bold text-gray-700">Image Quality</label>
@@ -632,14 +610,6 @@ export default function Compressor() {
                             </div>
                         )}
                     </div>
-                )}
-
-                {!loaded && (
-                    <div className="flex flex-col items-center py-10">
-                        <Loader2 className="animate-spin text-blue-500 mb-2" size={32} />
-                        <p className="text-gray-500 font-medium">Preparing the Smart-Bot...</p>
-                    </div>
-                )}
 
                 {/* File Queue */}
                 {files.length > 0 && (
@@ -719,7 +689,7 @@ export default function Compressor() {
                                                         Compress
                                                     </button>
                                                 )}
-                                                {fileItem.status === "error" && (
+                                                {fileItem.status === "error" && ACCEPTED_TYPES.includes(fileItem.file.type) && (
                                                     <button
                                                         onClick={() => retryFile(fileItem)}
                                                         className="text-xs bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded transition font-bold uppercase tracking-wider inline-flex items-center gap-1"
