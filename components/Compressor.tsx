@@ -20,6 +20,7 @@ interface FileItem {
     preview?: string;
     downloadLink?: string;
     errorMessage?: string;
+    remediation?: string;
     originalSize?: number;
     newSize?: number;
     jobId?: string; // Phase 2: backend job ID for async polling
@@ -80,13 +81,23 @@ function useJobPoller(
                         case "completed":
                             updatedFile.status = "done";
                             updatedFile.progress = 100;
-                            updatedFile.downloadLink = job.download_url;
+                            
+                            // Rewrite the backend's absolute URL to use the frontend's API_URL proxy
+                            // This prevents "localhost" resolution errors in cloud workspaces.
+                            try {
+                                const parsedUrl = new URL(job.download_url);
+                                updatedFile.downloadLink = `${apiUrl}${parsedUrl.pathname}`;
+                            } catch (e) {
+                                updatedFile.downloadLink = job.download_url;
+                            }
+                            
                             updatedFile.newSize = job.new_size;
                             updatedFile.originalSize = job.original_size;
                             break;
                         case "failed":
                             updatedFile.status = "error";
                             updatedFile.errorMessage = job.error || "Compression failed";
+                            updatedFile.remediation = job.remediation;
                             break;
                     }
 
@@ -131,7 +142,7 @@ export default function Compressor() {
     const [imageQuality, setImageQuality] = useState(15);
     const [showSettings, setShowSettings] = useState(false);
 
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api-backend";
 
     // Initialize job poller
     const { startPolling } = useJobPoller(files, setFiles, API_URL);
@@ -290,11 +301,38 @@ export default function Compressor() {
     };
 
     const compressOnServer = async (fileItem: FileItem) => {
-        const formData = new FormData();
-        formData.append("file", fileItem.file);
-        formData.append("crf", videoCrf.toString());
-
         try {
+            // 1. Get upload URL
+            const urlRes = await fetch(`${API_URL}/upload-url`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    filename: fileItem.file.name,
+                    content_type: fileItem.file.type || "application/octet-stream",
+                }),
+            });
+            
+            if (!urlRes.ok) {
+                const errorData = await urlRes.json().catch(() => ({ detail: `HTTP ${urlRes.status}` }));
+                throw new Error(errorData.detail || "Failed to get upload URL");
+            }
+            const { upload_url, storage_key } = await urlRes.json();
+
+            // 2. Upload file directly to storage
+            const uploadRes = await fetch(upload_url, {
+                method: "PUT",
+                headers: { "Content-Type": fileItem.file.type || "application/octet-stream" },
+                body: fileItem.file,
+            });
+            if (!uploadRes.ok) throw new Error(`Failed to upload file to storage (HTTP ${uploadRes.status})`);
+
+            // 3. Trigger compression
+            const formData = new FormData();
+            formData.append("storage_key", storage_key);
+            formData.append("filename", fileItem.file.name);
+            formData.append("original_size", fileItem.file.size.toString());
+            formData.append("crf", videoCrf.toString());
+
             // Phase 2: Use async mode by default
             const response = await fetch(`${API_URL}/compress-video?async=true`, {
                 method: "POST",
@@ -381,16 +419,29 @@ export default function Compressor() {
 
     const downloadAll = () => {
         const completedFiles = files.filter(f => f.status === "done" && f.downloadLink);
-        completedFiles.forEach((fileItem, index) => {
-            setTimeout(() => {
-                const link = document.createElement('a');
-                link.href = fileItem.downloadLink!;
-                link.download = `smartpress_${fileItem.file.name}`;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-            }, index * 300);
-        });
+        
+        if (completedFiles.length > 3) {
+            const fileNames = completedFiles.map(f => `smartpress_${f.file.name}`).join(',');
+            const batchDownloadUrl = `${API_URL}/download-batch?files=${encodeURIComponent(fileNames)}`;
+            
+            const link = document.createElement('a');
+            link.href = batchDownloadUrl;
+            link.download = 'smartpress_batch.zip';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } else {
+            completedFiles.forEach((fileItem, index) => {
+                setTimeout(() => {
+                    const link = document.createElement('a');
+                    link.href = fileItem.downloadLink!;
+                    link.download = `smartpress_${fileItem.file.name}`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }, index * 300);
+            });
+        }
     };
 
     const formatBytes = (bytes: number) => {
@@ -482,9 +533,17 @@ export default function Compressor() {
 
             case "error":
                 return (
-                    <div className="bg-red-50 text-red-700 text-xs px-3 py-1.5 rounded-md font-medium mt-2 flex items-center gap-2">
-                        <AlertCircle size={14} />
-                        <span>Error: {fileItem.errorMessage}</span>
+                    <div className="flex flex-col gap-2 mt-2">
+                        <div className="bg-red-50 text-red-700 text-xs px-3 py-1.5 rounded-md font-medium flex items-center gap-2">
+                            <AlertCircle size={14} />
+                            <span>Error: {fileItem.errorMessage}</span>
+                        </div>
+                        {fileItem.remediation && (
+                            <div className="bg-blue-50 text-blue-800 text-xs px-3 py-2 rounded-md font-medium border border-blue-100 flex items-start gap-2">
+                                <Monitor size={14} className="mt-0.5 text-blue-600 flex-shrink-0" />
+                                <span><strong className="text-blue-900">AI Tip:</strong> {fileItem.remediation}</span>
+                            </div>
+                        )}
                     </div>
                 );
 

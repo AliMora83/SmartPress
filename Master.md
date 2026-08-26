@@ -77,7 +77,7 @@ At minimum, the following must work in at least one verified environment (local 
 - [x] **Task 2.3** — Persistent Storage (GCS):
   - Replace `temp_uploads` and `temp_processed` local directories with **Google Cloud Storage** buckets for durability and scaling. (Added abstraction layer with local fallback).
 
-**Phase 2 Status: ✅ DEVELOPMENT COMPLETE / AWAITING GCP BILLING FOR DEPLOY**
+**Phase 2 Status: ✅ DEVELOPMENT COMPLETE <!-- / AWAITING GCP BILLING FOR DEPLOY -->**
 
 **Phase 2 Runtime Rule**
 
