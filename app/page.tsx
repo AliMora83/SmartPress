@@ -1,5 +1,6 @@
 import Compressor from "@/components/Compressor";
 import Image from "next/image";
+import { version } from "../package.json";
 
 export default function Home() {
   return (
@@ -30,13 +31,13 @@ export default function Home() {
             className="text-slate-700 font-medium leading-tight text-base md:text-2xl"
             style={{ fontFamily: 'var(--font-montserrat)' }}
           >
-            Fast, smart compression for <br className="md:hidden" /> <span className="font-bold">images and video.</span>
+            Fast, smart compression for <br className="md:hidden" /> <span className="font-bold">images and PDFs.</span>
           </p>
 
           {/* Version Number */}
           <div className="pt-2">
             <span className="text-[10px] md:text-xs font-bold text-slate-400 tracking-widest uppercase" style={{ fontFamily: 'var(--font-montserrat)' }}>
-              Version 2.0.0
+              Version {version}
             </span>
           </div>
         </div>
