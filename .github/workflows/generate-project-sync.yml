@@ -27,24 +27,24 @@ jobs:
           COMMIT_MSG="${{ github.event.head_commit.message }}"
           SHORT_SHA="${{ github.sha }}"
           SHORT_SHA="${SHORT_SHA:0:7}"
-          VERSION=$(grep -oP 'Version: \K[0-9]+\.[0-9]+\.[0-9]+' Master.md 2>/dev/null || echo "0.0.0")
+          VERSION=$(node -p "require('./package.json').version")
 
           cat > PROJECT-SYNC.json << ENDJSON
           {
             "project": "SmartPress",
             "repo": "AliMora83/SmartPress",
             "branch": "main",
-            "stack": "TypeScript / Next.js 15 / Python / FastAPI / FFmpeg / Tailwind CSS",
+            "stack": "TypeScript / Next.js 16 / React 19 / Tailwind CSS — fully client-side",
             "status": "Active",
             "priority": 2,
             "priority_label": "🟡 Priority 2 — Active Development",
-            "progress_percent": 60,
-            "progress_label": "MVP core complete — pending deploy",
-            "current_phase": "Phase 1 — MVP Stabilisation",
-            "next_step": "FFmpeg pipeline stability validation · Error handling for unsupported formats",
+            "progress_percent": 35,
+            "progress_label": "v3 rebuild — backend removed, codec layer next",
+            "current_phase": "Phase 1 — Strip & Rebuild the Core",
+            "next_step": "Sprint 1.2 — codec layer (wasm encoders, CodecSpec, worker pool)",
             "blocker": null,
-            "live_url": null,
-            "deploy_target": "Vercel (frontend) · Docker + Google Cloud Run (backend)",
+            "live_url": "https://smartpress.namka.cloud",
+            "deploy_target": "Static frontend — namka.cloud",
             "agents": ["Claude", "Comet"],
             "version": "$VERSION",
             "last_push": {

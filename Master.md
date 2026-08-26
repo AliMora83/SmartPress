@@ -1,18 +1,20 @@
 # SmartPress — Intelligent File Compression
 
-> Owner: Ali Mora | Location: Johannesburg, ZA  
-> Last updated: 2026-04-02 | Version: 1.2.0
+> Owner: Ali Mora | Location: Johannesburg, ZA
+> Last updated: 2026-08-26 | Version: see `package.json`
 
 ## 🎯 Mission
 
-Provide a fast, professional, and visually stunning web interface for batch image and video compression, leveraging Next.js 15 and a Python-powered FFmpeg backend.
+A fast, offline-capable, local-first compressor for **images and PDFs**. Everything runs in
+the browser — no backend, no accounts, no network calls at runtime. Video has moved to a
+separate project.
 
 ## 🏗 Stack
 
-- **Frontend**: Next.js 15 (App Router) / TypeScript / Tailwind CSS
-- **Backend**: Python FastAPI / FFmpeg (Docker-ready)
+- **Frontend**: Next.js 16 (App Router) / React 19 / TypeScript / Tailwind CSS
+- **Compression**: native browser decode + vendored wasm encoders (no backend)
 - **Typography**: Montserrat (Extra Bold for titles)
-- **Deployment**: Vercel (Frontend) / Google Cloud Run (Backend)
+- **Deployment**: static bundle → namka.cloud
 
 ---
 
@@ -29,103 +31,53 @@ At minimum, the following must work in at least one verified environment (local 
 - A user can complete one full flow: **upload → compress → download**.
 - Errors are rendered as structured UX states (typed error model), not generic crashes or silent failures.
 
+> **v3 amendment:** the backend health-check clause no longer applies — there is no backend.
+> The constraint now binds at the end of *every sprint*, not just every phase.
+
 ---
 
 ## 📋 Build Phases
 
-### Phase 1 ✅ MVP Stabilisation
+Plan of record is [`SmartPress-v3-Plan.md`](./SmartPress-v3-Plan.md). It supersedes the v2
+phases and the `SmartPress-Update` evolution plan. Summary only below — the plan file owns
+the task detail.
 
-*Focus: Stabilization without architectural changes, with a working synchronous flow.*
+### Phase 1 — Strip & Rebuild the Core → `3.0.0-alpha.1`
 
-**Objectives**
+*The backend is gone and image compression is measurably better than v2.*
 
-- Implement a working synchronous compression path:
-  - upload file → validate → compress with FFmpeg → return compressed output.
-- Add robust `ffprobe` validation and a canonical error model.
-- Ensure the app is operational in local dev and at least one deployed environment.
+- **Sprint 1.1 — Extraction & Demolition** ✅ Video project extracted at tag
+  `v3.0.0-pre-split`; `backend/`, Docker, Netlify and Cloud Run config deleted; `@ffmpeg/*`
+  removed; temporary canvas bridge keeps images working; docs reconciled.
+- **Sprint 1.2 — The Codec Layer** — wasm encoders vendored to `/public/wasm/`, native
+  decode, `CodecSpec` interface, 0–10 quality curves, pixel-budgeted worker pool,
+  benchmark corpus.
+- **Sprint 1.3 — Pipeline Rewrite** — collapse `Compressor.tsx` to a client-only pipeline,
+  delete the canvas bridge and the server path, rewrite `Error Handling` for local failure
+  modes.
 
-**Tasks**
+### Phase 2 — The Product Layer → `3.0.0`
 
-- [x] Initial UI redesign with fixed sidebar and Montserrat branding.
-- [x] Backend FastAPI scaffold with FFmpeg integration.
-- [x] **Task 1.1** — ffprobe Validation Layer: Implement a pre-compression check using `ffprobe` to catch corrupt files and unsupported codecs before processing begins.
-- [x] **Task 1.2** — BackgroundTask Transition: Move `ffmpeg.run` into FastAPI `BackgroundTasks`; API returns 202 Accepted immediately to prevent frontend timeouts on large files.
-- [x] **Task 1.3** — Structured Error Schema: Map FFmpeg exit codes to the canonical JSON error model (`CORRUPT_MEDIA`, `FILE_TOO_LARGE`, `UNSUPPORTED_FORMAT`, `FFMPEG_TIMEOUT`, etc.). See `Error Handling` file.
-- [x] **Phase 1 Runtime Verification**: Resolved syntax errors and performed a successful smoke test with `Test-Video.mp4`.
+- **Sprint 2.1 — Mode Router** — Image | PDF toggle as a loading strategy.
+- **Sprint 2.2 — Conversion & Quality** — output formats, transparency guard, resize that
+  never upscales, EXIF handling.
+- **Sprint 2.3 — Batch & Delivery** — ZIP via `fflate` at store level, batch summary.
 
-**Phase 1 Status: ✅ CLOSED (Stable MVP)**
+### Phase 3 — Offline & PDF → `3.1.0`
 
----
-
-### Phase 2 🔄 The Asynchronous Leap (Active)
-
-*Focus: Decoupling compute from the API while staying usable throughout.*
-
-**Objectives**
-
-- Move heavy FFmpeg workloads off the request-response thread (Cloud Run Jobs).
-- Introduce job-based processing with status polling.
-- Preserve an operational compression path throughout migration.
-
-**Tasks**
-
-- [ ] **Task 2.1** — Cloud Run Jobs Integration: Move heavy FFmpeg execution out of the main API container into **Cloud Run Jobs**. (Deferred to Phase 3 infrastructure updates — using BackgroundTasks currently).
-- [x] **Task 2.2** — Status Polling API:
-  - Implement `/status/{job_id}` endpoint.
-  - Frontend transitions from a single “waiting” state to progress-tracking states:
-    - `Queued`, `Processing`, `Finalizing`, `Completed`, `Failed`.
-- [x] **Task 2.3** — Persistent Storage (GCS):
-  - Replace `temp_uploads` and `temp_processed` local directories with **Google Cloud Storage** buckets for durability and scaling. (Added abstraction layer with local fallback).
-
-**Phase 2 Status: ✅ DEVELOPMENT COMPLETE <!-- / AWAITING GCP BILLING FOR DEPLOY -->**
-
-**Phase 2 Runtime Rule**
-
-- Do **not** remove or break the existing working compression flow until:
-  - Cloud Run Jobs + status polling are fully verified.
-- Job-based processing must be introduced as an **additive improvement**, not a breaking replacement.
-- End-of-phase check:
-  - A user can still complete upload → compress → download via the current UX (synchronous or job-based).
-  - Status states are reflected correctly in the UI.
+- **Sprint 3.1 — Offline & PWA** — static export, service worker, airplane-mode gate.
+- **Sprint 3.2 — PDF, Route A** — `pdf-lib`, DCTDecode re-encode, honest coverage messaging.
+- **Sprint 3.3 — Hardening & Release** — soak tests, cancel/abort, a11y, CI.
 
 ---
 
-### Phase 3 🧠 Intelligent Diagnostics & Scale
+## 🔒 Cross-cutting rules
 
-*Focus: AI integration and high-capacity handling, with graceful degradation.*
-
-**Objectives**
-
-- Use Gemini to interpret FFmpeg logs into human-friendly messages and remediation tips.
-- Optimize upload and delivery paths using signed URLs and CDN.
-- Ensure core compression works even if AI/CDN are down.
-
-**Tasks**
-
-- [ ] **Task 3.1** — Gemini Log Interpreter:
-  - Integrate **Vertex AI (Gemini 1.5 Flash)** to analyze FFmpeg `stderr` on failure.
-  - Generate user-friendly remediation tips (e.g., “File header missing, try re-exporting from your editor.”).
-- [ ] **Task 3.2** — Direct-to-GCS Uploads:
-  - Implement **Signed URLs** so the browser uploads files directly to Cloud Storage, bypassing Cloud Run request size limits and reducing memory/CPU on the API.
-- [ ] **Task 3.3** — Edge Delivery:
-  - Enable **Cloud CDN** for the `processed/` bucket for rapid downloads for users in Southern Africa and beyond.
-
-**Phase 3 Runtime Rule**
-
-- Compression must still work if:
-  - Gemini log interpretation is unavailable or misconfigured.
-  - Cloud CDN is misconfigured or temporarily disabled.
-- AI and edge features are **enhancements**, not hard dependencies for the core upload → compress → download flow.
-
----
-
-## ✅ Blocking Runtime Issue
-
-**Status: CLOSED (2026-04-02)**  
-**Priority:** High  
-**Owners:** Claude (review), AG (fix), Comet (documentation follow-up)
-
-All 4 integration checks (Backend Base URL, API Route Alignment, CORS, and Smoke Test) have been completed successfully.
+1. **Always-On Constraint** — upload → compress → download works at the end of every sprint.
+2. **No runtime CDN** — every `.wasm` is vendored into `/public` and loaded from a local path.
+3. **No blocking loader** — the dropzone renders immediately; codecs load on first use.
+4. **Errors are typed UX states**, never generic crashes or silent failures.
+5. **Single source of truth for version:** `package.json`.
 
 ---
 
@@ -144,19 +96,10 @@ All 4 integration checks (Backend Base URL, API Route Alignment, CORS, and Smoke
 
 | Date | Agent | Activity |
 |:---|:---|:---|
+| 2026-08-26 | Claude (Sonnet 5) | Sprint 1.1 — extraction, backend/FFmpeg demolition, canvas bridge, doc reconciliation. |
 | 2026-04-15 | AG (Antigravity) | UI Polish — Improved visibility and contrast for compression settings labels and values. |
-| 2026-04-02 | AG (Antigravity) | Smoke Test — Phase 1 Runtime Verification |
+| 2026-04-02 | AG (Antigravity) | Smoke Test — Phase 1 Runtime Verification (v2 architecture, now retired). |
+| 2026-04-01 | Comet (Perplexity) | Reviewed & approved SmartPress Evolution Plan and added Always-On Constraint. |
 
-**Smoke Test Details (PASS):**
-- **Environment:** Local Development (Next.js 15 + FastAPI)
-- **File tested:** `Test-Video.mp4` (1.36 MB)
-- **Result:** **PASS**
-- **Output:** 211.06 KB (85% reduction)
-- **Download:** Verified successful download from backend.
-- **Error Handling:** Verified recoverable error for malformed test files.
-- **Visual Audit Score:** 10/10
-
-| 2026-04-01 | Comet (Perplexity) | Reviewed & approved SmartPress Evolution Plan (`SmartPress-Update`) and added Always-On Constraint + Blocking Runtime Issue | Phase 1 tasks documented as complete from an implementation/planning perspective, but operational runtime verification is still required before Phase 1 is considered fully closed. Claude: ensure UI accommodates Job Status states (Queued, Processing, Finalizing). Comet: verify Cloud Run Jobs IAM/Pub-Sub trigger permissions in Phase 2.1. |
-| 2026-04-01 | Comet (Perplexity) | Reviewed `SmartPress-Update` incl. Claude sign-off response. Approved: Sprint 1 tasks (1.1 ffprobe, 1.2 BackgroundTask, 1.3 Error Schema). Flagged: Blocking Runtime Issue remains open. | Phase 1 gate is smoke test. AG owns fix; Claude owns UX design for status states; Comet monitors documentation. |
-
-> Note to AI: Read AI_CHANGELOG.md and AGENT-ONBOARDING.md on every new chat session.
+> Note to AI: read `SmartPress-v3-Plan.md` (plan of record) and `AI-Logs.md` (changelog) at
+> the start of every session. `CLAUDE.md` holds the working rules.

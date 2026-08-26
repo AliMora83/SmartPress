@@ -2,24 +2,18 @@
   "project": "SmartPress",
   "repo": "AliMora83/SmartPress",
   "branch": "main",
-  "stack": "TypeScript / Next.js 15 / Python / FastAPI / FFmpeg / Tailwind CSS",
+  "stack": "TypeScript / Next.js 16 / React 19 / Tailwind CSS — fully client-side",
   "status": "Active",
   "priority": 2,
   "priority_label": "🟡 Priority 2 — Active Development",
-  "progress_percent": 60,
-  "progress_label": "MVP core complete — pending deploy",
-  "current_phase": "Phase 1 — MVP Stabilisation",
-  "next_step": "FFmpeg pipeline stability validation · Error handling for unsupported formats",
+  "progress_percent": 35,
+  "progress_label": "v3 rebuild — backend removed, codec layer next",
+  "current_phase": "Phase 1 — Strip & Rebuild the Core",
+  "next_step": "Sprint 1.2 — codec layer (wasm encoders, CodecSpec, worker pool)",
   "blocker": null,
-  "live_url": null,
-  "deploy_target": "Vercel (frontend) · Docker + Google Cloud Run (backend)",
+  "live_url": "https://smartpress.namka.cloud",
+  "deploy_target": "Static frontend — namka.cloud",
   "agents": ["Claude", "Comet"],
-  "version": "1.2.0",
-  "last_push": {
-    "timestamp": "2026-04-15T19:03:22Z",
-    "actor": "AliMora83",
-    "commit_message": "chore(ui): improve compression settings visibility & fix build",
-    "sha": "9ea26df"
-  },
-  "last_updated": "2026-04-15"
+  "version": "3.0.0-alpha.1",
+  "last_updated": "2026-08-26"
 }

@@ -5,6 +5,51 @@
 
 ---
 
+## 2026-08-26 | Sprint 1.1 — Extraction & Demolition | Claude (Sonnet 5)
+
+**The pivot:** SmartPress moves from images+video to images+PDF, running fully client-side.
+FFmpeg was the only reason a backend existed, so `backend/` was deleted rather than ported —
+and with it every open security and infrastructure issue from the v2 review.
+
+- **Recovery point:** tagged `v3.0.0-pre-split` and pushed before any deletion. An
+  additional checkpoint commit preserved uncommitted Phase 3 work (direct-to-storage
+  uploads, Gemini remediation, `ai_diagnostics.py`) that would otherwise have been lost.
+- **Extracted to a sibling repo:** `backend/`, `DEPLOY_CLOUD_RUN.md`, `Stabilise FFmpeg`,
+  `SmartPress-Update`, `test_video.mp4`. The FastAPI + Cloud Run Jobs + storage-abstraction
+  work (~90% complete) carries over intact, along with its four open review items.
+- **Removed from this repo:** `backend/` (11 tracked files, 0 `.py` files remain),
+  `Dockerfile`, `.dockerignore`, `.gcloudignore`, `netlify.toml`, `DEPLOY_CLOUD_RUN.md`,
+  `test_video.mp4`, `Stabilise FFmpeg`, `SmartPress-Update`. Dropped `@ffmpeg/ffmpeg` and
+  `@ffmpeg/util` (4 packages removed from the lockfile).
+- **Temporary canvas bridge:** image compression now runs through
+  `createImageBitmap(file, { imageOrientation: "from-image" })` → `OffscreenCanvas` →
+  `convertToBlob`, satisfying the Always-On Constraint without FFmpeg. Deliberately
+  short-lived — Sprint 1.3 replaces it with the wasm codec layer and deletes it. The old
+  `-vf scale=1280:-1` was **not** reproduced: it upscaled small images. Canvas PNG often
+  grows the file, so output larger than input is discarded and the row reads
+  "already optimal".
+- **Removed the `unpkg.com` ffmpeg-core fetch**, satisfying the no-runtime-CDN rule and
+  removing the 30 MB blocking "Preparing the Smart-Bot..." gate. The dropzone now renders
+  immediately.
+- **Images-only UI:** accept filter narrowed to `image/jpeg,image/png`; dropped files are
+  validated too (v2's drag-and-drop bypassed the accept filter entirely) and rejected as a
+  typed error row rather than crashing. Removed the dead "Video Quality (CRF)" control.
+- **Version unified:** package renamed `smart-compressor` → `smartpress` at
+  `3.0.0-alpha.1`. `app/page.tsx` now imports the version from `package.json` instead of
+  the hardcoded "Version 2.0.0", and the PROJECT-SYNC CI workflow reads it from
+  `package.json` rather than grepping `Master.md`.
+- **Config:** dropped the COOP/COEP headers block (ffmpeg.wasm multithreading only) and the
+  dead `/api-backend` rewrite. CI switched `npm install` → `npm ci`.
+- **Docs reconciled:** `AGENT-ONBOARDING.md` deleted in favour of `CLAUDE.md` (it was a
+  hand-rolled version of a convention Claude Code already has, and nothing enforced it —
+  which is why its broken `AI_CHANGELOG.md` pointer survived so long). `Master.md`,
+  `README.md`, `DEPLOY.md` and `PROJECT-SYNC.json` rewritten against the v3 plan.
+  `Error Handling` deliberately held — Sprint 1.3 rewrites it against the new failure modes.
+- **Status:** **Sprint 1.1 complete.** Build and lint pass clean; zero Python and zero
+  server references outside `Error Handling` (held) and historical log entries.
+
+---
+
 ## 2026-04-15 | UI Polish & Visibility Improvements | AG (Antigravity)
 - **UI/UX Refinement:** Updated CSS classes for compression settings (CRF and Image Quality sliders). Modified labels and numerical value indicators to increase contrast and readability against the gray background by using bolder typography, darker colors (`text-gray-800`), and subtle dynamic shadows.
 
