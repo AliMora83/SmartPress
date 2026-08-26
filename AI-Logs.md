@@ -18,7 +18,7 @@
 - **Validation:** 
   - Successful e2e async smoke test using `Test Video.mp4`: 3.09 MB → 760 KB (76% reduction) in ~5 seconds.
   - Phase 1 synchronous path preserved seamlessly for backward compatibility.
-- **Status:** **Phase 2 Development Complete**. (GCS and Cloud Run deployment awaiting GCP billing reactivation).
+- **Status:** **Phase 2 Development Complete**. <!-- (GCS and Cloud Run deployment awaiting GCP billing reactivation). -->
 
 ---
 
@@ -43,6 +43,7 @@ AG completed a deep audit of Phase 1 integration checks and submitted a Phase 1 
 
 | Check | Status | Detail |
 |---|---|---|
+<!--
 | Backend URL | ❌ FAIL | 503 Server Error — billing disabled on `smartpress-486210` |
 | API Route Alignment | ✅ PASS | Frontend `${API_URL}/compress-video` ↔ Backend `POST /compress-video` confirmed aligned |
 | CORS Configuration | ⚠️ PENDING | Env vars ready, blocked by billing |
@@ -55,6 +56,7 @@ AG completed a deep audit of Phase 1 integration checks and submitted a Phase 1 
 - **Phase 1 Gate Status**: Phase 1 remains **OPEN**. The smoke test cannot be run until Cloud Run services are responsive.
 - **AG Action Required**: Enable billing on GCP project `smartpress-486210` via the [Google Cloud Billing Console](https://console.cloud.google.com/billing). Once restored, re-run the 4 integration checks and report back.
 - **No Phase 2 work to begin** until Phase 1 smoke test passes. This constraint remains active.
+-->
 
 ---
 

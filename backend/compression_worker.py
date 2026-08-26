@@ -15,6 +15,7 @@ from typing import Optional
 
 from job_store import job_store, JobStatus
 from storage import StorageBackend
+from ai_diagnostics import analyze_ffmpeg_error
 
 
 # FFmpeg error code mapping — matches Phase 1 structured error schema
@@ -79,6 +80,59 @@ def _classify_error(stderr_output: str) -> tuple[str, str]:
             return code, message
     return "COMPRESSION_FAILED", "An unexpected error occurred during compression."
 
+def _compress_image(
+    job_id: str,
+    input_path: Path,
+    output_path: Path,
+    storage: StorageBackend,
+    processed_bucket: str,
+) -> None:
+    """Compress static images using Pillow."""
+    try:
+        from PIL import Image
+    except ImportError:
+        print("[Worker] Pillow not installed. Cannot compress image.")
+        job_store.update_status(job_id, JobStatus.FAILED, error="Image processing library not installed.")
+        return
+
+    try:
+        job_store.update_status(job_id, JobStatus.PROCESSING, progress=10)
+        
+        with Image.open(input_path) as img:
+            # Convert RGBA/P to RGB for JPEG
+            if output_path.suffix.lower() in ['.jpg', '.jpeg'] and img.mode in ('RGBA', 'P'):
+                img = img.convert('RGB')
+                
+            save_kwargs = {'optimize': True}
+            if output_path.suffix.lower() in ['.jpg', '.jpeg']:
+                save_kwargs['quality'] = 85
+                
+            img.save(output_path, **save_kwargs)
+            
+        # Finalize
+        job_store.update_status(job_id, JobStatus.FINALIZING, progress=99)
+        new_size = output_path.stat().st_size
+        
+        storage_key = output_path.name
+        storage.upload(output_path, storage_key, processed_bucket)
+        download_url = storage.get_download_url(storage_key, processed_bucket)
+        
+        job_store.update_status(
+            job_id,
+            JobStatus.COMPLETED,
+            progress=100,
+            new_size=new_size,
+            download_url=download_url,
+        )
+        print(f"[Worker] Job {job_id[:8]} COMPLETED image compression.")
+        
+    except Exception as e:
+        print(f"[Worker] Job {job_id[:8]} FAILED: {e}")
+        job_store.update_status(job_id, JobStatus.FAILED, error=str(e), error_code="IMAGE_PROCESSING_FAILED")
+    finally:
+        _cleanup(input_path, output_path)
+
+
 
 def run_compression(
     job_id: str,
@@ -100,6 +154,12 @@ def run_compression(
     On success, uploads the processed file to storage and sets the download URL.
     On failure, records the structured error.
     """
+    
+    # Intercept images
+    if input_path.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp"]:
+        _compress_image(job_id, input_path, output_path, storage, processed_bucket)
+        return
+
     try:
         # --- PROCESSING ---
         job_store.update_status(job_id, JobStatus.PROCESSING, progress=0)
@@ -160,11 +220,15 @@ def run_compression(
             stderr_output = "".join(stderr_lines)
             error_code, error_message = _classify_error(stderr_output)
             print(f"[Worker] Job {job_id[:8]} FAILED: {error_code} — {stderr_output[:200]}")
+            
+            remediation_tip = analyze_ffmpeg_error(stderr_output, error_code)
+            
             job_store.update_status(
                 job_id,
                 JobStatus.FAILED,
                 error=error_message,
                 error_code=error_code,
+                remediation=remediation_tip,
             )
             _cleanup(input_path, output_path)
             return

@@ -1,14 +1,17 @@
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks, Query
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks, Query, Request
 import os
 import time
 import shutil
 import ffmpeg
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pathlib import Path
 from dotenv import load_dotenv
 from typing import Dict, Any, List, Optional
+from pydantic import BaseModel
+import zipfile
+import io
 
 from job_store import job_store, JobStatus
 from compression_worker import run_compression
@@ -163,10 +166,53 @@ def health_check() -> Dict[str, Any]:
     }
 
 
+class UploadUrlRequest(BaseModel):
+    filename: str
+    content_type: str
+
+class UploadUrlResponse(BaseModel):
+    upload_url: str
+    storage_key: str
+
+@app.post("/upload-url", response_model=UploadUrlResponse)
+async def get_upload_url(request: UploadUrlRequest) -> Dict[str, str]:
+    import uuid
+    storage_key = f"{uuid.uuid4().hex}_{request.filename}"
+    upload_url = storage_backend.generate_upload_url(
+        storage_key, 
+        GCS_BUCKET_UPLOADS, 
+        request.content_type
+    )
+    return {"upload_url": upload_url, "storage_key": storage_key}
+
+@app.put("/local-upload/{bucket_name}/{key}")
+async def local_upload(bucket_name: str, key: str, request: Request):
+    """Mock endpoint to handle direct uploads in local dev."""
+    # Determine if GCS is actually active
+    import os
+    use_gcs = os.getenv("USE_GCS", "false").lower() == "true"
+    gcs_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if use_gcs and gcs_creds:
+        # We shouldn't receive traffic here if real GCS is used, but just in case
+        raise HTTPException(status_code=400, detail="Local upload disabled when GCS is active")
+        
+    target_path = PROCESSED_DIR / bucket_name / key
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(target_path, "wb") as f:
+        async for chunk in request.stream():
+            f.write(chunk)
+            
+    return {"status": "ok"}
+
+
 @app.post("/compress-video")
 async def compress_video(
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
+    storage_key: Optional[str] = Form(None),
+    filename: Optional[str] = Form(None),
+    original_size: Optional[int] = Form(None),
     crf: int = Form(28),
     use_async: bool = Query(default=True, alias="async"),
 ) -> Dict[str, Any]:
@@ -185,26 +231,44 @@ async def compress_video(
         Async mode: 202 with job_id and status_url
         Sync mode: 200 with download_url and file sizes
     """
-    # Validate upload
-    file_size = _validate_upload(file)
-    print(f"Received file: {file.filename}, type: {file.content_type}, size: {format_file_size(file_size)}")
+    if storage_key:
+        if not filename or original_size is None:
+            raise HTTPException(status_code=400, detail="filename and original_size form fields are required when using storage_key")
+        
+        actual_filename = filename
+        actual_original_size = original_size
+        
+        input_path = UPLOAD_DIR / storage_key
+        try:
+            storage_backend.download(storage_key, GCS_BUCKET_UPLOADS, input_path)
+            print(f"Downloaded {storage_key} from storage to {input_path}")
+        except Exception as e:
+            print(f"Failed to download {storage_key} from storage: {e}")
+            raise FileNotFoundErrorCustom(detail=f"Uploaded file {storage_key} not found in storage.")
+    else:
+        if not file:
+            raise HTTPException(status_code=400, detail="Either file or storage_key must be provided")
+            
+        # Validate upload
+        actual_original_size = _validate_upload(file)
+        actual_filename = file.filename or "upload.mp4"
+        print(f"Received file: {actual_filename}, type: {file.content_type}, size: {format_file_size(actual_original_size)}")
 
-    input_path = UPLOAD_DIR / file.filename
-    output_filename = f"smartpress_{file.filename}"
+        input_path = UPLOAD_DIR / actual_filename
+        # Save uploaded file to disk
+        print(f"Saving uploaded file to {input_path}")
+        with open(input_path, "wb") as buffer:
+            import shutil
+            shutil.copyfileobj(file.file, buffer)
+
+    output_filename = f"smartpress_{actual_filename}"
     output_path = PROCESSED_DIR / output_filename
-
-    # Save uploaded file to disk
-    print(f"Saving uploaded file to {input_path}")
-    with open(input_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    original_size = os.path.getsize(input_path)
 
     # ── ASYNC MODE (Phase 2) ──
     if use_async:
         # Create job record
-        job = job_store.create_job(filename=file.filename, original_size=original_size)
-        print(f"[Async] Created job {job.job_id[:8]} for {file.filename}")
+        job = job_store.create_job(filename=actual_filename, original_size=actual_original_size)
+        print(f"[Async] Created job {job.job_id[:8]} for {actual_filename}")
 
         # Enqueue compression in background
         background_tasks.add_task(
@@ -234,7 +298,7 @@ async def compress_video(
 
     # ── SYNC MODE (Phase 1 backward compatibility) ──
     try:
-        print(f"[Sync] Processing: {file.filename} (CRF: {crf})")
+        print(f"[Sync] Processing: {actual_filename} (CRF: {crf})")
 
         stream = ffmpeg.input(str(input_path))
         stream = ffmpeg.output(
@@ -248,14 +312,14 @@ async def compress_video(
         ffmpeg.run(stream, overwrite_output=True, quiet=True)
 
         new_size = os.path.getsize(output_path)
-        reduction_percent = ((original_size - new_size) / original_size) * 100
+        reduction_percent = ((actual_original_size - new_size) / actual_original_size) * 100
 
-        print(f"[Sync] Compression complete: {format_file_size(original_size)} → {format_file_size(new_size)} ({reduction_percent:.1f}% reduction)")
+        print(f"[Sync] Compression complete: {format_file_size(actual_original_size)} → {format_file_size(new_size)} ({reduction_percent:.1f}% reduction)")
 
         return {
             "status": "success",
             "download_url": f"{BACKEND_URL}/download/{output_filename}",
-            "original_size": original_size,
+            "original_size": actual_original_size,
             "new_size": new_size
         }
 
@@ -317,3 +381,50 @@ async def download_file(filename: str):
         return FileResponse(storage_path, filename=filename)
 
     raise FileNotFoundErrorCustom(detail="File not found")
+
+@app.get("/download-batch")
+async def download_batch(files: str = Query(..., description="Comma separated list of filenames")):
+    """
+    Download multiple processed files as a single zip archive.
+    
+    Args:
+        files: A comma-separated list of filenames.
+        
+    Returns:
+        FileResponse of the zip file.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="No filenames provided")
+        
+    # We will create a temp file for the zip
+    import uuid
+    zip_filename = f"batch_{uuid.uuid4().hex[:8]}.zip"
+    zip_path = PROCESSED_DIR / zip_filename
+    
+    file_list = [f.strip() for f in files.split(',') if f.strip()]
+    
+    try:
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for filename in file_list:
+                file_path = PROCESSED_DIR / filename
+                storage_path = PROCESSED_DIR / GCS_BUCKET_PROCESSED / filename
+                
+                # Determine which path exists
+                actual_path = file_path if file_path.exists() else storage_path
+                
+                if actual_path.exists():
+                    # Add to zip
+                    zipf.write(actual_path, arcname=filename)
+                else:
+                    print(f"Warning: File {filename} requested for batch download not found.")
+                    
+        return FileResponse(
+            zip_path, 
+            filename="smartpress_batch.zip",
+            media_type="application/zip",
+            # We don't delete immediately because FileResponse needs to read it.
+            # It will be cleaned up by the background task (cleanup_old_files)
+        )
+    except Exception as e:
+        cleanup_file(zip_path)
+        raise HTTPException(status_code=500, detail=f"Failed to create zip: {str(e)}")

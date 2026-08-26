@@ -32,6 +32,7 @@ class JobRecord:
     download_url: Optional[str] = None
     error: Optional[str] = None
     error_code: Optional[str] = None  # CORRUPT_MEDIA, FFMPEG_TIMEOUT, etc.
+    remediation: Optional[str] = None
     created_at: float = field(default_factory=time.time)
     completed_at: Optional[float] = None
 
@@ -86,6 +87,7 @@ class JobStore:
         download_url: Optional[str] = None,
         error: Optional[str] = None,
         error_code: Optional[str] = None,
+        remediation: Optional[str] = None,
     ) -> None:
         """Update a job's status and optional fields."""
         with self._lock:
@@ -103,6 +105,8 @@ class JobStore:
                 record.error = error
             if error_code is not None:
                 record.error_code = error_code
+            if remediation is not None:
+                record.remediation = remediation
             if status in (JobStatus.COMPLETED, JobStatus.FAILED):
                 record.completed_at = time.time()
 

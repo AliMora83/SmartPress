@@ -31,8 +31,18 @@ class StorageBackend(ABC):
         ...
 
     @abstractmethod
+    def generate_upload_url(self, key: str, bucket_name: str, content_type: str, expiry_seconds: int = 3600) -> str:
+        """Generate a signed URL for direct upload."""
+        ...
+
+    @abstractmethod
     def get_download_url(self, key: str, bucket_name: str, expiry_seconds: int = 3600) -> str:
         """Get a download URL for a stored file."""
+        ...
+
+    @abstractmethod
+    def download(self, key: str, bucket_name: str, local_path: Path) -> None:
+        """Download a file from storage to a local path."""
         ...
 
     @abstractmethod
@@ -61,6 +71,18 @@ class GCSStorage(StorageBackend):
         print(f"[GCS] Uploaded {local_path.name} → gs://{bucket_name}/{key}")
         return key
 
+    def generate_upload_url(self, key: str, bucket_name: str, content_type: str, expiry_seconds: int = 3600) -> str:
+        from datetime import timedelta
+        bucket = self._client.bucket(bucket_name)
+        blob = bucket.blob(key)
+        url = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(seconds=expiry_seconds),
+            method="PUT",
+            content_type=content_type,
+        )
+        return url
+
     def get_download_url(self, key: str, bucket_name: str, expiry_seconds: int = 3600) -> str:
         from datetime import timedelta
         bucket = self._client.bucket(bucket_name)
@@ -71,6 +93,12 @@ class GCSStorage(StorageBackend):
             method="GET",
         )
         return url
+
+    def download(self, key: str, bucket_name: str, local_path: Path) -> None:
+        bucket = self._client.bucket(bucket_name)
+        blob = bucket.blob(key)
+        blob.download_to_filename(str(local_path))
+        print(f"[GCS] Downloaded gs://{bucket_name}/{key} → {local_path}")
 
     def delete(self, key: str, bucket_name: str) -> None:
         bucket = self._client.bucket(bucket_name)
@@ -108,9 +136,22 @@ class LocalStorage(StorageBackend):
         print(f"[LocalStorage] Copied {local_path.name} → {dest}")
         return key
 
+    def generate_upload_url(self, key: str, bucket_name: str, content_type: str, expiry_seconds: int = 3600) -> str:
+        # Mock signed URL for local development
+        return f"{self._backend_url}/local-upload/{bucket_name}/{key}"
+
     def get_download_url(self, key: str, bucket_name: str, expiry_seconds: int = 3600) -> str:
         # For local dev, return the direct download endpoint URL
         return f"{self._backend_url}/download/{key}"
+
+    def download(self, key: str, bucket_name: str, local_path: Path) -> None:
+        import shutil
+        src = self._resolve_path(key, bucket_name)
+        if src.exists():
+            shutil.copy2(str(src), str(local_path))
+            print(f"[LocalStorage] Copied {src} → {local_path}")
+        else:
+            raise FileNotFoundError(f"File {src} not found in local storage.")
 
     def delete(self, key: str, bucket_name: str) -> None:
         path = self._resolve_path(key, bucket_name)
