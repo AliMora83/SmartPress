@@ -31,8 +31,19 @@ export default function Home() {
             className="text-slate-700 font-medium leading-tight text-base md:text-2xl"
             style={{ fontFamily: 'var(--font-montserrat)' }}
           >
-            Fast, smart compression for <br className="md:hidden" /> <span className="font-bold">images and PDFs.</span>
+            Fast, smart compression for <br className="md:hidden" /> <span className="font-bold">images.</span>
           </p>
+
+          {/* PDF is Sprint 2.1. Say so rather than let the tagline promise a format the
+              dropzone rejects. */}
+          <div className="flex justify-center">
+            <span
+              className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[10px] md:text-xs font-semibold uppercase tracking-wider text-slate-500"
+              style={{ fontFamily: 'var(--font-montserrat)' }}
+            >
+              PDF — coming soon
+            </span>
+          </div>
 
           {/* Version Number */}
           <div className="pt-2">
