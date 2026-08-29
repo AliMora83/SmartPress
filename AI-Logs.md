@@ -5,6 +5,104 @@
 
 ---
 
+## 2026-08-29 | Patch 1.1 — Download Correctness & Gain Threshold | Claude (Opus 5)
+
+Two patches on top of Sprint 1.1, both confined to the canvas bridge era. Neither is codec
+work; they exist so Sprint 1.2 measures against a pipeline that is actually correct.
+
+### Canvas bridge baseline — `3.0.0-alpha.2`
+
+Four JPEGs, production build, zero network requests on download. **Sprint 1.2's benchmarks
+measure against these numbers.**
+
+| Original | Output | Change |
+|---|---|---|
+| 1.07 MB | 178.85 KB | −84% |
+| 222.86 KB | 96.68 KB | −57% |
+| 139.73 KB | 120 KB | −14% |
+| 120.73 KB | 120.56 KB | −0% |
+
+PNG has no baseline row: canvas cannot compress it, so every PNG correctly keeps its
+original. Real PNG numbers arrive with the quantizer in Sprint 1.2.
+
+### Patch 1.1a — download 404s
+
+Chrome returned `404 — File wasn't available on site` on most rows. Two independent causes,
+not one:
+
+- **(b) A surviving server path.** `downloadAll()` still built
+  `${API_URL}/download-batch?files=...` whenever more than three files had completed.
+  Sprint 1.1 set `API_URL = ""` when the backend was deleted, so that href resolved against
+  the origin and Next.js answered the 404. Sprint 1.1's verification grepped for
+  `NEXT_PUBLIC_API_URL` and `localhost:8000`; a bare relative path passed straight through
+  that check.
+- **(c) Blob URLs outliving their page session.** Not an over-eager revoke effect, which was
+  the obvious suspect. The URLs were being **persisted to IndexedDB alongside the file
+  items**, so a reload restored rows as `done` carrying URLs minted by a page session that
+  no longer existed. Every restored link was byte-identical to the previous session's and
+  every one was dead. This is why exactly one row appeared to work — the one compressed
+  live in the current session.
+
+Fixed by deleting the batch branch outright (there is no backend and no batch endpoint),
+keeping blob URLs out of IndexedDB, and resetting restored rows to `pending` rather than
+offering a link that cannot resolve. Object URLs are now created once when a result is
+produced and revoked only on row removal, queue clear, recompress and unmount — never
+during render. A `Set` guards against double-revoke.
+
+### Patch 1.1b — gain threshold
+
+The −0% row above was re-encoded to save **170 bytes**, spending a full generation of JPEG
+quality for 0.14%. The keep-original branch only triggered when output was the same size or
+larger, so it never caught this.
+
+**Decision: `MIN_GAIN_RATIO = 0.03`.** An encode must save at least 3% of the original to be
+worth shipping; below that the original is kept and the row takes the no-gain path. The
+constant and its predicate live in **`lib/compression.ts`**, not as a literal in
+`Compressor.tsx` — Sprint 1.2's codec layer needs the same rule and must not redefine it.
+
+Verified on the bridge: a JPEG whose re-encode gains 1.29% (160,739 → 158,667 bytes) is now
+kept as the original. The −82%, −59% and −13% rows are unaffected.
+
+No-gain rows read as a quiet secondary state — "No size reduction — original kept" with a
+muted "Download original" link, not the green primary button — and download under their
+**original filename**. Only files SmartPress actually re-encoded carry the `smartpress_`
+prefix.
+
+### `downloadAll()` — current behaviour, named so it is not rediscovered
+
+With four completed files it fires **four individual anchor clicks, one per file**, each
+against that row's own `blob:` URL, staggered by `index * 300`ms. There is no ZIP and no
+batch request. Filenames follow the same prefix rule as the per-row links.
+
+Two consequences worth knowing before Phase 2:
+
+- Chrome treats the second and later programmatic downloads from one origin as
+  "Download multiple files?" and prompts once per origin. Deny it and the remaining files
+  are dropped silently — the app is not told.
+- The 300ms stagger is wall-clock `setTimeout`, so a backgrounded tab coalesces the timers
+  and the clicks arrive together.
+
+Real batching is `fflate` at store level, which the plan puts in **Phase 2 (Sprint 2.3)**.
+Deliberately not built here.
+
+### Known deviation from the plan
+
+**IndexedDB still stores whole file items, including `File` objects.** Patch 1.1a stopped
+persisting the blob *URLs*, which fixed the 404s, but the Sprint 1.3 rule — *IndexedDB
+stores settings only: no `File` objects, no previews, no writes on every progress tick* — is
+still violated. Flagged here so 1.3 treats it as known scope rather than a discovery.
+
+### Housekeeping
+
+- Deleted `test.zip` from the repo root: 21 bytes containing the ASCII string
+  `Internal Server Error`, a v2 backend error response someone saved to disk.
+- The tagline promised "images and PDFs" while the dropzone accepted JPEG and PNG only. It
+  now reads "images" with a visible **PDF — coming soon** marker, matching the Sprint 2.1
+  plan rather than silently rejecting a format the sidebar advertised.
+- **Version:** `3.0.0-alpha.2` → `3.0.0-alpha.3`.
+
+---
+
 ## 2026-08-26 | Sprint 1.1 — Extraction & Demolition | Claude (Sonnet 5)
 
 **The pivot:** SmartPress moves from images+video to images+PDF, running fully client-side.
