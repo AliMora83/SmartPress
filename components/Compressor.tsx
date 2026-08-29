@@ -4,6 +4,7 @@
 import { useState, useRef, useEffect, useCallback, DragEvent } from "react";
 import { Upload, FileVideo, Download, CheckCircle, MinusCircle, Server, Monitor, X, Image as ImageIcon, Settings2, RefreshCw, Clock, Cpu, Package, AlertCircle } from "lucide-react";
 import { get, set } from "idb-keyval";
+import { isWorthKeeping } from "@/lib/compression";
 
 const ACCEPTED_TYPES = ["image/jpeg", "image/png"];
 
@@ -310,8 +311,10 @@ export default function Compressor() {
 
         const blob = await canvas.convertToBlob({ type, quality: toCanvasQuality(imageQuality) });
 
-        // Canvas PNG often grows the file. Never ship output bigger than the input.
-        const optimal = blob.size >= fileItem.file.size;
+        // Canvas PNG often grows the file, and a JPEG that saves a few hundred bytes has
+        // still spent a generation of quality. Keep the original unless the encode clears
+        // the shared gain threshold.
+        const optimal = !isWorthKeeping(fileItem.file.size, blob.size);
         const output = optimal ? fileItem.file : blob;
 
         setFiles(prev => prev.map(f =>
