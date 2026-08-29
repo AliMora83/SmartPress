@@ -1,6 +1,6 @@
 {
   "name": "smartpress",
-  "version": "3.0.0-alpha.2",
+  "version": "3.0.0-alpha.3",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
