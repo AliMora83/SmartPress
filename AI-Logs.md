@@ -5,6 +5,126 @@
 
 ---
 
+## 2026-08-30 | Sprint 1.2 — The Codec Layer | Claude (Opus 5)
+
+Built `lib/codecs/` behind a narrow interface. **No UI wiring** — the canvas
+bridge stays live and `components/Compressor.tsx` is byte-for-byte unchanged
+(`git diff` empty against both the index and `main`). Sprint 1.3 does the swap.
+
+### What shipped
+
+| Format | Backing | Control | wasm | Status |
+|---|---|---|---|---|
+| JPEG | `@jsquash/jpeg@1.6.0` (MozJPEG) | quality | `mozjpeg_enc.wasm` 251,524 B | ✅ |
+| PNG | **vendored** imagequant 4.3.3 | quality (quantization) | `pngquant_bg.wasm` 349,781 B | ✅ |
+| WebP | `@jsquash/webp@1.5.0` (libwebp) | quality | `webp_enc[_simd].wasm` 281,261 / 345,584 B | ✅ |
+| AVIF | `@jsquash/avif@2.1.1` | quality | *not vendored* | ❌ **blocked** |
+
+All `@jsquash` packages are Apache-2.0, published 2025-05. Crucially they have
+**no `exports` map**, so deep imports work — the property icodec lacked.
+
+### AVIF is blocked: it stalls the Turbopack build
+
+`@jsquash/avif` in the module graph makes `next build` hang exactly the way
+icodec did. Bisected:
+
+| Configuration | `next build` |
+|---|---|
+| `main` (no codec layer) | **14.95 s** |
+| codec layer present but unreferenced | **14.95 s** |
+| JPEG + PNG + WebP reachable | **17.59 s** |
+| \+ AVIF | **never completes** (killed at 10 min) |
+
+Ruled out along the way: the worker (stalls without it), `output: 'standalone'`
+(stalls without it), and glue size (~40 KB per codec). It is AVIF specifically.
+
+AVIF is not needed before Sprint 2.2, so the sprint ships without it rather than
+blocking Phase 1. `CAPABILITIES.avif.available === false`, `FORMATS` excludes it,
+and `encoders.ts` throws with the reason plus the code to restore. **Re-enabling
+it requires fixing the build first, not just uncommenting.**
+
+### Benchmark
+
+Fixture set: the eight files from the Patch 1.1 canvas baseline, regenerated from
+`Test Image.png` via `sips` into `public/__fixtures/` (gitignored). Harness is the
+unlinked `/bench` route, running through the real worker pool.
+
+**At the default quality 7/10:**
+
+| File | Original | Canvas | Sprint 1.2 | vs original | encode |
+|---|---|---|---|---|---|
+| A-large-q95.jpg | 835,992 | 147,087 | 148,249 | −82.27% | 850 ms |
+| B-mid-q70.jpg | 184,220 | 74,889 | 76,899 | −58.26% | 454 ms |
+| C-small-q55.jpg | 81,622 | 57,126 | 58,446 | −28.39% | 336 ms |
+| D-marginal-q42.jpg | 67,153 | 58,580 | 60,094 | −10.51% | 342 ms |
+| P1.png | 1,065,228 | 1,065,228 | 134,587 | **−87.37%** | 3,363 ms |
+| P2.png | 629,412 | 629,412 | 78,911 | **−87.46%** | 2,333 ms |
+| P3.png | 321,119 | 321,119 | 40,974 | **−87.24%** | 1,332 ms |
+| P4.png | 115,568 | 115,568 | 15,220 | **−86.83%** | 539 ms |
+
+Outputs sit slightly above the spike's because the default maps to native q79
+(JPEG) and q85 (PNG), where the spike used q75 for both. **At matched native q75
+the output is byte-identical to the spike:**
+
+| File | Spike (icodec) | Sprint 1.2 @ matched q75 |
+|---|---|---|
+| A-large-q95.jpg | 130,903 | **130,903** |
+| B-mid-q70.jpg | 69,317 | **69,317** |
+| C-small-q55.jpg | 51,239 | **51,239** |
+| D-marginal-q42.jpg | 57,441 | **57,441** |
+| P1.png | 111,948 | **111,948** |
+| P2.png | 72,317 | **72,317** |
+| P3.png | 37,069 | **37,069** |
+| P4.png | 14,327 | **14,327** |
+
+Exact parity, as expected — the same MozJPEG and the same imagequant build,
+reached through a different package. The ceiling from the spike is met.
+
+**Sprint 1.3 must reproduce the quality-7 table.** A mismatch means the UI is
+passing different options than the harness.
+
+### Per-format lazy loading — proven behaviourally
+
+Neither the page's `PerformanceObserver` nor the DevTools recorder observes
+worker-initiated fetches, so this was tested by removing the binaries instead:
+with `pngquant_bg.wasm` and both WebP binaries deleted from the server, a JPEG
+still compressed normally (184,220 → 76,899). The positive control confirms the
+test is not vacuous — a PNG then failed with
+`Failed to load /wasm/pngquant_bg.wasm: HTTP 404`, surfacing as a clean typed
+error rather than a crash.
+
+### Notes for Sprint 1.3
+
+- **Progress is stage-based, not continuous.** These encoders expose no progress
+  callback, so the worker reports `decoding` (5%) then `encoding` (25%) and jumps
+  to 100%. At ~3.4 s for a 1 MB PNG the UI needs to read as working, not as a
+  percentage crawling.
+- **Cancellation terminates the worker.** A wasm encode has no yield point, so
+  `CodecPool.cancel()` kills the worker and replaces it. Queued jobs are just
+  dropped.
+- **Decode runs in the worker**, not on the caller's thread — so no `ImageData`
+  crosses the boundary at all. Blob in, encoded bytes out (transferred).
+- **Main-thread responsiveness is still unmeasured.** The automation pane runs
+  the tab hidden, which clamps timers and fakes a ~1 s stall, so the probe was
+  discarded again. `/bench` reports the figure for a human to read in a visible
+  tab.
+- **The vendored `pngquant.js` is modified** — upstream's default
+  `new URL('pngquant_bg.wasm', import.meta.url)` branch is unreachable for us but
+  Turbopack resolves it at build time and fails. Replaced with a throw and marked
+  inline, as the GPL requires.
+
+### Verification
+
+- `next build` **17.59 s** vs 14.95 s on `main` (+2.6 s).
+- `npm run lint` — **5 warnings, all pre-existing** in `Compressor.tsx`.
+  `lib/codecs/vendor/**` is eslint-ignored: vendored code is not ours to restyle.
+- `git diff components/Compressor.tsx` — **empty**.
+- Bundle: the main entry `/` is **unchanged at 573.4 KB**, since nothing imports
+  the codec layer yet. Reaching it costs **+161.1 KB** of glue on that route.
+  No wasm is bundled — all 1.2 MB is fetched on demand from `/wasm/`.
+
+---
+
 ## 2026-08-30 | Codec Gate — icodec spike, PNG decision, GPLv3 | Claude (Opus 5)
 
 Resolves the Sprint 1.2 decision gate. No production code changed; the canvas

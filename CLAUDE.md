@@ -24,6 +24,18 @@ product in a broken or offline state. At minimum, in at least one verified envir
 - Errors are rendered as structured UX states (typed error model), not generic crashes or
   silent failures.
 
+## Dev and build use different bundlers
+
+`next dev --webpack` runs webpack; `next build` runs Turbopack. They resolve
+wasm-heavy codec packages differently, so **a change that works in dev is not
+verified until `next build` completes**.
+
+This is not theoretical. The icodec spike passed in dev and hung Turbopack
+indefinitely (two runs, 20 and 30 minutes, against a ~15 s baseline).
+`@jsquash/avif` does the same and is disabled for that reason -- see
+`lib/codecs/encoders.ts` and the Sprint 1.2 entry in `AI-Logs.md`. Any new codec
+or wasm dependency gets a `next build` before it is called done.
+
 ## No runtime CDN
 
 Every `.wasm` binary is vendored into `/public` and imported from a local path. No
