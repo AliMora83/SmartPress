@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Generated test fixtures — local only, never committed (may include brand assets)
+public/__fixtures/
