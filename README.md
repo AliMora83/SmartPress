@@ -102,4 +102,21 @@ Building AI-assisted SaaS at velocity 🚀
 
 ---
 
+## Licence
+
+SmartPress is licensed under the **GNU General Public License v3.0 or later**.
+See [`LICENSE`](./LICENSE) for the full text.
+
+The GPL is a deliberate choice, not an inherited default. SmartPress vendors
+**libimagequant** for PNG palette quantization, which is GPL-3.0-or-later for
+open-source use. Quantization is where the PNG savings are — roughly −87% to
+−93% in our benchmarks, against ~20% for lossless-only optimisation — so the
+project takes the GPL rather than ship materially worse results.
+
+Third-party components and the provenance of every vendored `.wasm` binary are
+recorded in [`NOTICE`](./NOTICE).
+
+
+---
+
 *Last Updated: 2026-08-26*

@@ -1,0 +1,67 @@
+# Third-party notices — SmartPress
+
+SmartPress is licensed under the GNU General Public License v3.0 or later.
+See `LICENSE` for the full text.
+
+SmartPress is licensed under the GPL because it vendors **libimagequant**, which
+is GPL-3.0-or-later for open-source use. That is a deliberate choice, recorded in
+`AI-Logs.md`: palette quantization is where the PNG savings live (measured at
+−87% to −93%, against ~20% for lossless-only), and no permissively licensed
+quantizer matched it. See the Sprint 1.2 entry for the alternatives considered.
+
+---
+
+## Vendored WebAssembly binaries
+
+These binaries are redistributed under `/public/wasm/` and are served to the
+browser at runtime, which is a distribution of the work. Their terms follow.
+
+### `pngquant_bg.wasm` — PNG quantization and optimisation
+
+Extracted from [`icodec`](https://github.com/Kaciras/icodec) v0.6.0
+(`dist/pngquant_bg.wasm`), whose own wrapper code is MIT (Copyright (c) 2024
+Kaciras).
+
+**Note:** icodec's `versions.json` does not list the PNG upstreams and its
+`LICENSE` carries no third-party notices, so the contents below were determined
+by reading the crate paths embedded in the binary itself rather than by trusting
+the package metadata. Verified crate versions:
+
+| Crate | Version | Licence |
+|---|---|---|
+| **imagequant** | 4.3.3 | **GPL-3.0-or-later** |
+| oxipng | 9.1.2 | MIT |
+| png | 0.17.14 | MIT OR Apache-2.0 |
+| libdeflater | 1.22.0 | Apache-2.0 |
+| arrayvec, bitvec, bytemuck, crc32fast, fdeflate, hashbrown, indexmap, once_cell, serde-wasm-bindgen, wyz | see crates.io | MIT / Apache-2.0 |
+
+`imagequant` is dual-licensed: GPL-3.0-or-later for open-source use, or a
+separate paid commercial licence from the copyright holder. SmartPress relies on
+the GPL arm. Apache-2.0 components are compatible with GPLv3 (though not GPLv2).
+
+Upstream: <https://github.com/ImageOptim/libimagequant>
+
+**Regenerating:** these bytes come from a published icodec release. To rebuild
+from source instead, compile `imagequant` + `oxipng` to wasm via `wasm-bindgen`
+(icodec's build scripts show the configuration). Rebuilding from upstream is
+preferable to trusting a binary whose own package under-declares its contents.
+
+### `mozjpeg.wasm` — JPEG encoding
+
+MozJPEG v4.1.5 — <https://github.com/mozilla/mozjpeg>
+BSD-3-Clause and IJG licence terms.
+
+### `webp-enc.wasm` — WebP encoding
+
+libwebp v1.4.0 — <https://github.com/webmproject/libwebp>
+BSD-3-Clause (Google Inc.).
+
+---
+
+## npm dependencies
+
+Codec packages from the [jSquash](https://github.com/jamsinclair/jSquash)
+project are Apache-2.0, repackaged from Google's Squoosh (Apache-2.0).
+
+Remaining runtime and build dependencies are MIT or Apache-2.0; see
+`package-lock.json` for the resolved set.
