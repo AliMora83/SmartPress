@@ -5,6 +5,118 @@
 
 ---
 
+## 2026-08-30 | Codec Gate — icodec spike, PNG decision, GPLv3 | Claude (Opus 5)
+
+Resolves the Sprint 1.2 decision gate. No production code changed; the canvas
+bridge stayed live throughout. The spike lives on `spike/icodec`, tagged
+`spike/icodec-v1`, and is not merged.
+
+### Decision: `@jsquash` for JPEG/WebP/AVIF, vendored pngquant for PNG
+
+`icodec` was **rejected on packaging, not on output**. Its output was the best
+measured:
+
+| Fixture | Original | Canvas bridge | icodec | vs canvas |
+|---|---|---|---|---|
+| A-large-q95.jpg | 835,992 | 147,087 | **130,903** | −11.0% |
+| B-mid-q70.jpg | 184,220 | 74,889 | **69,317** | −7.4% |
+| C-small-q55.jpg | 81,622 | 57,126 | **51,239** | −10.3% |
+| D-marginal-q42.jpg | 67,153 | 58,580 | **57,441** | −1.9% |
+| P1.png | 1,065,228 | 1,065,228 | **111,948** | **−89.5%** |
+| P2.png | 629,412 | 629,412 | **72,317** | **−88.5%** |
+| P3.png | 321,119 | 321,119 | **37,069** | **−88.5%** |
+| P4.png | 115,568 | 115,568 | **14,327** | **−87.6%** |
+
+Canvas cannot compress PNG, so its PNG column is the original size. Encode times:
+JPEG 163–556 ms; PNG 492–4,857 ms. Harder PNG classes held up — a synthetic flat
+UI screenshot hit −93.4%, and two RGBA logos −83.8% / −84.5% with alpha preserved
+as palette + `tRNS`, partial transparency intact.
+
+**These are the ceiling Sprint 1.2 should reach.** Materially worse means
+misconfiguration, not a result.
+
+Why it was rejected anyway:
+
+- The `exports` map allows only `.`, `./node`, `./version.json` and `*.wasm`.
+  Deep imports fail with `ERR_PACKAGE_PATH_NOT_EXPORTED`, so the barrel is the
+  only entry point — and the plan requires per-format loading.
+- `index.js` assigns `globalThis._icodec_ImageData` as a load-bearing side
+  effect, so it cannot be tree-shaken away.
+- The barrel pulls every codec's glue, including `heic-enc`'s emscripten pthread
+  runtime (`em-pthread`) — a codec we can never use, having dropped COOP/COEP.
+- **`next build` never completed.** Two runs under Turbopack, 20 and 30 minutes,
+  against a ~14 s baseline on `main`, never passing "Creating an optimized
+  production build ...". Dev passed, because `next dev --webpack` and
+  `next build` use different bundlers.
+
+### Carried forward: the wasm raw-bytes loading technique
+
+This is reusable and belongs to no particular package. Both loader families
+accept raw bytes:
+
+- emscripten builds → `factory({ wasmBinary: arrayBuffer })`
+- wasm-bindgen builds → `init({ module_or_path: arrayBuffer })`
+
+So the worker fetches the binary from `/wasm/` and hands over the bytes, instead
+of letting the package resolve its own asset. This **bypasses bundler wasm asset
+handling entirely** and needed no `next.config` change — no COOP/COEP, nothing
+Phase 3's static export could not emit. Verified: the worker bundle referenced
+only `/wasm/mozjpeg.wasm` and `/wasm/pngquant_bg.wasm`, with zero CDN references.
+
+### PNG: `@jsquash` has no quantizer
+
+Confirmed against the registry and the package tarballs, not from memory.
+`@jsquash/imagequant`, `/quantize` and `/pngquant` all 404. Both PNG packages are
+lossless-only:
+
+| Package | Version | Options | Nature |
+|---|---|---|---|
+| `@jsquash/png` | 3.1.1 | `{ bitDepth?: 8 }` | lossless |
+| `@jsquash/oxipng` | 2.3.0 | `{ level, interlace, optimiseAlpha }` | lossless |
+
+Lossless-only lands near −20%, which the plan already judged as making SmartPress
+look worse than the tools it replaces. So PNG uses **vendored pngquant** from
+icodec's build, loaded by the raw-bytes technique. Behind `lib/codecs/` the split
+is invisible.
+
+Also noted: `@jsquash/oxipng` ships `pkg` and `pkg-parallel` builds and
+auto-selects via `isWorker && hardwareConcurrency > 1 && await threads()`. On a
+non-isolated page `threads()` is false, so it degrades to single-threaded
+correctly — but the parallel build's dynamic import still sits in the module
+graph, which is the shape that stalled Turbopack on the spike.
+
+### Licence: GPL-3.0-or-later
+
+`pngquant_bg.wasm` provenance was established by reading crate paths **embedded
+in the binary**, because icodec's `versions.json` omits its PNG upstreams and its
+`LICENSE` carries no third-party notices — the package under-declares what it
+ships, so its MIT label cannot be relied on.
+
+| Crate | Version | Licence |
+|---|---|---|
+| **imagequant** | 4.3.3 | **GPL-3.0-or-later** |
+| oxipng | 9.1.2 | MIT |
+| png | 0.17.14 | MIT OR Apache-2.0 |
+| libdeflater | 1.22.0 | Apache-2.0 |
+
+`imagequant` is dual-licensed: GPL-3.0-or-later, or a paid commercial licence.
+SmartPress takes the GPL arm rather than lose −87% to −93% on PNG. The repo had
+**no licence at all** beforehand, so this is an initial grant, not a
+relicensing — and `git blame` puts every surviving line in HEAD on the sole
+copyright holder, so the grant is unilateral. `google-labs-jules[bot]` has 50
+commits in history but zero surviving lines; its Netlify and Cloud Run work was
+deleted in Sprint 1.1.
+
+Serving the wasm and JS to a browser conveys the work, so the obligations apply
+regardless of hosting: source availability and a reachable notice. The
+user-facing notice is Sprint 1.3's Task 5. Provenance and terms are in `NOTICE`.
+
+**Fallback if a permissive licence is ever needed:** `image-q` (MIT, pure
+TypeScript, slower than wasm). The swap is contained behind `lib/codecs/`, so it
+would not reach the UI.
+
+---
+
 ## 2026-08-29 | Patch 1.1 — Download Correctness & Gain Threshold | Claude (Opus 5)
 
 Two patches on top of Sprint 1.1, both confined to the canvas bridge era. Neither is codec
