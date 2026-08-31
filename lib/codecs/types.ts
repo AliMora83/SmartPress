@@ -30,10 +30,31 @@ export interface CodecCapability {
     available?: boolean;
 }
 
+/**
+ * PNG has two paths behind one codec: quantize to a palette (lossy, where the
+ * ~87% savings live) or optimise losslessly. The plan settles lossy as the
+ * default with a visible radio to switch, so the mode travels with the options
+ * rather than being a separate format.
+ */
+export type PngMode = "lossy" | "lossless";
+
 /** Options accepted by the public encode(). Quality is the abstract 0-10 scale. */
 export interface EncodeOptions {
     /** 0-10, higher is better. Default 7. Mapped per codec in quality.ts. */
     quality?: number;
+    /**
+     * PNG only. Lossy quantizes and spends the control on quality; lossless
+     * keeps every pixel and spends it on encoder effort. Ignored by other
+     * codecs. Defaults to DEFAULT_PNG_MODE.
+     */
+    pngMode?: PngMode;
+    /**
+     * Calibration seam. Bypasses the 0-10 curve and hands the encoder this
+     * native value directly. Only /bench sets it -- it exists so a curve can be
+     * measured against native quality without editing quality.ts between runs.
+     * Nothing in the product path passes it.
+     */
+    nativeOverride?: number;
 }
 
 export interface ImageDataLike {

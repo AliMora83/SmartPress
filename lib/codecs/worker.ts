@@ -8,13 +8,14 @@
  */
 import { decode, toPlain } from "./decode";
 import { encode } from "./index";
-import type { Format } from "./types";
+import type { EncodeOptions, Format } from "./types";
 
 export type WorkerRequest = {
     id: string;
     file: Blob;
     format: Format;
-    quality: number;
+    /** The abstract 0-10 scale plus any per-codec options. Curves live in quality.ts. */
+    options: EncodeOptions;
 };
 
 export type WorkerResponse =
@@ -26,7 +27,7 @@ const post = (msg: WorkerResponse, transfer?: Transferable[]) =>
     (self as unknown as Worker).postMessage(msg, transfer ?? []);
 
 self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
-    const { id, file, format, quality } = e.data;
+    const { id, file, format, options } = e.data;
     try {
         post({ id, type: "progress", stage: "decoding", progress: 5 });
         const t0 = performance.now();
@@ -37,7 +38,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         // stage-based rather than continuous. Encoding is the long pole
         // (~4.9 s for a 1 MB PNG), so the UI shows it as in-flight from here.
         post({ id, type: "progress", stage: "encoding", progress: 25 });
-        const out = await encode(toPlain(image), format, { quality });
+        const out = await encode(toPlain(image), format, options);
         const t2 = performance.now();
 
         const buf = out.buffer.slice(

@@ -8,14 +8,13 @@
  */
 export { decode, toPlain } from "./decode";
 export { CAPABILITIES, FORMATS, ALL_FORMATS, capabilityOf } from "./capabilities";
-export { DEFAULT_QUALITY, nativeQuality } from "./quality";
+export { DEFAULT_QUALITY, DEFAULT_PNG_MODE, nativeQuality, effortLevel } from "./quality";
 export { loadWasm, clearWasmCache } from "./loader";
 export type {
-    Format, CodecCapability, ControlKind, EncodeOptions, ImageDataLike,
+    Format, CodecCapability, ControlKind, EncodeOptions, ImageDataLike, PngMode,
 } from "./types";
 
 import { getEncoder } from "./encoders";
-import { DEFAULT_QUALITY } from "./quality";
 import type { EncodeOptions, Format, ImageDataLike } from "./types";
 
 /**
@@ -30,7 +29,7 @@ export async function encode(
     options: EncodeOptions = {},
 ): Promise<Uint8Array> {
     const encoder = await getEncoder(format);
-    return encoder(data, options.quality ?? DEFAULT_QUALITY);
+    return encoder(data, options);
 }
 
 /** Best-effort format guess from a file's MIME type. */

@@ -1,6 +1,6 @@
 import { loadWasm } from "./loader";
-import { nativeQuality } from "./quality";
-import type { Format, ImageDataLike } from "./types";
+import { DEFAULT_PNG_MODE, resolveEffort, resolveNative } from "./quality";
+import type { EncodeOptions, Format, ImageDataLike } from "./types";
 
 /**
  * Per-format encoders, each behind a dynamic import so nothing loads until the
@@ -10,7 +10,7 @@ import type { Format, ImageDataLike } from "./types";
  * Each encoder is initialised once and memoised.
  */
 
-type Encoder = (image: ImageDataLike, scale: number) => Promise<Uint8Array>;
+type Encoder = (image: ImageDataLike, options: EncodeOptions) => Promise<Uint8Array>;
 
 const ready = new Map<Format, Promise<Encoder>>();
 
@@ -31,8 +31,8 @@ async function makeJpeg(): Promise<Encoder> {
         loadWasm("mozjpeg_enc.wasm"),
     ]);
     await init(module);
-    return async (image, scale) => {
-        const buf = await encode(image as ImageData, { quality: nativeQuality("jpeg", scale) });
+    return async (image, options) => {
+        const buf = await encode(image as ImageData, { quality: resolveNative("jpeg", options) });
         return new Uint8Array(buf);
     };
 }
@@ -44,8 +44,8 @@ async function makeWebp(): Promise<Encoder> {
         loadWasm(simd ? "webp_enc_simd.wasm" : "webp_enc.wasm"),
     ]);
     await init(module);
-    return async (image, scale) => {
-        const buf = await encode(image as ImageData, { quality: nativeQuality("webp", scale) });
+    return async (image, options) => {
+        const buf = await encode(image as ImageData, { quality: resolveNative("webp", options) });
         return new Uint8Array(buf);
     };
 }
@@ -89,13 +89,25 @@ async function makePng(): Promise<Encoder> {
         ) => Uint8Array;
     };
     await init({ module_or_path: module });
-    return async (image, scale) => {
+    return async (image, options) => {
+        // Two paths behind one codec. Lossy quantizes to a palette and spends
+        // the control on quality; lossless keeps every pixel and spends it on
+        // oxipng effort instead, so the slider never goes dead. `quantize`
+        // is what the vendored binary switches on.
+        const lossless = (options.pngMode ?? DEFAULT_PNG_MODE) === "lossless";
+        // The options struct is deserialised whole on the Rust side and its
+        // fields have no defaults -- a partial object fails inside wasm with an
+        // opaque `unwrap_throw` panic. So both paths pass every field and differ
+        // only in `quantize` and what the control feeds.
         return optimize(image.data, image.width, image.height, {
-            quality: nativeQuality("png", scale),
-            quantize: true,
+            quality: lossless ? 100 : resolveNative("png", options),
+            quantize: !lossless,
             speed: 4,
             dithering: 1,
-            level: 3,
+            // Lossy fixes oxipng effort at 3 and spends the control on palette
+            // quality; lossless has no quality to trade, so the control buys
+            // effort here instead and the slider never goes dead.
+            level: lossless ? resolveEffort(options) : 3,
             interlace: false,
             colors: 256,
             bit_depth: 8,

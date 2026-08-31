@@ -1,5 +1,8 @@
-import type { Format } from "./types";
+import type { EncodeOptions, Format } from "./types";
 import type { WorkerRequest, WorkerResponse } from "./worker";
+
+/** Which half of the job a progress tick belongs to. Mirrors the worker. */
+export type Stage = "decoding" | "encoding";
 
 /**
  * Worker pool.
@@ -20,8 +23,14 @@ export interface CompressJob {
     id: string;
     file: Blob;
     format: Format;
-    quality: number;
-    onProgress?: (progress: number) => void;
+    /** The abstract 0-10 scale plus per-codec options; curves live in quality.ts. */
+    options: EncodeOptions;
+    /**
+     * Stage is passed through, not just the number. These encoders expose no
+     * progress callback, so a percentage alone crawls and reads as hung; the UI
+     * needs to say which stage it is in.
+     */
+    onProgress?: (progress: number, stage: Stage) => void;
 }
 
 export interface CompressResult {
@@ -29,6 +38,20 @@ export interface CompressResult {
     decodeMs: number;
     encodeMs: number;
 }
+
+/**
+ * Cancellation is not a failure. Callers check `name` rather than matching on a
+ * message, so a cancelled row can stay quiet instead of rendering an error.
+ */
+export class CancelledError extends Error {
+    constructor() {
+        super("CANCELLED");
+        this.name = "CancelledError";
+    }
+}
+
+export const isCancelled = (e: unknown) =>
+    e instanceof Error && (e.name === "CancelledError" || e.message === "CANCELLED");
 
 type Slot = { worker: Worker; jobId: string | null };
 
@@ -81,18 +104,21 @@ export class CodecPool {
     private dispatch(slot: Slot, waiting: Waiting) {
         const { job } = waiting;
         slot.jobId = job.id;
-        this.live.set(job.id, { slot, waiting: null });
+        // The waiting entry stays reachable after dispatch: cancelling a running
+        // job terminates its worker, and something still has to settle the
+        // caller's promise or it hangs forever.
+        this.live.set(job.id, { slot, waiting });
 
         const onMessage = (e: MessageEvent<WorkerResponse>) => {
             const msg = e.data;
             if (msg.id !== job.id) return;
             if (msg.type === "progress") {
-                job.onProgress?.(msg.progress);
+                job.onProgress?.(msg.progress, msg.stage);
                 return;
             }
             cleanup();
             if (msg.type === "done") {
-                job.onProgress?.(100);
+                job.onProgress?.(100, "encoding");
                 waiting.resolve({
                     bytes: new Uint8Array(msg.bytes),
                     decodeMs: msg.decodeMs,
@@ -120,7 +146,7 @@ export class CodecPool {
         slot.worker.addEventListener("error", onError as EventListener);
 
         const req: WorkerRequest = {
-            id: job.id, file: job.file, format: job.format, quality: job.quality,
+            id: job.id, file: job.file, format: job.format, options: job.options,
         };
         slot.worker.postMessage(req);
     }
@@ -133,23 +159,26 @@ export class CodecPool {
     cancel(id: string) {
         const entry = this.live.get(id);
         if (!entry) return;
+        this.live.delete(id);
 
-        if (entry.waiting) {
-            const i = this.queue.indexOf(entry.waiting);
-            if (i >= 0) this.queue.splice(i, 1);
-            entry.waiting.reject(new Error("CANCELLED"));
-            this.live.delete(id);
+        // Queued but not started: drop it from the queue, no worker involved.
+        if (!entry.slot) {
+            if (entry.waiting) {
+                const i = this.queue.indexOf(entry.waiting);
+                if (i >= 0) this.queue.splice(i, 1);
+                entry.waiting.reject(new CancelledError());
+            }
             return;
         }
 
+        // Running: kill the worker. Its listeners die with it, so the promise
+        // is settled here rather than by a message that will never arrive.
         const slot = entry.slot;
-        if (slot) {
-            slot.worker.terminate();
-            const i = this.slots.indexOf(slot);
-            if (i >= 0) this.slots.splice(i, 1);
-            this.live.delete(id);
-            this.pump();
-        }
+        slot.worker.terminate();
+        const i = this.slots.indexOf(slot);
+        if (i >= 0) this.slots.splice(i, 1);
+        entry.waiting?.reject(new CancelledError());
+        this.pump();
     }
 
     /** Cancel everything -- queue clear, or unmount. */
