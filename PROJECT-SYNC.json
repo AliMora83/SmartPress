@@ -14,12 +14,12 @@
   "live_url": "https://smartpress.namka.cloud",
   "deploy_target": "Static frontend — namka.cloud",
   "agents": ["Claude", "Comet"],
-  "version": "3.0.0-alpha.2",
+  "version": "3.0.0-alpha.3",
   "last_push": {
-    "timestamp": "2026-08-26T19:07:40Z",
+    "timestamp": "2026-08-31T08:29:17Z",
     "actor": "AliMora83",
-    "commit_message": "fix: PROJECT-SYNC.json generation produces valid JSON",
-    "sha": "70f79ba"
+    "commit_message": "chore: merge PROJECT-SYNC.json bot commit from origin",
+    "sha": "c985c21"
   },
-  "last_updated": "2026-08-26"
+  "last_updated": "2026-08-31"
 }
