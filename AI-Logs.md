@@ -43,6 +43,33 @@ blocking Phase 1. `CAPABILITIES.avif.available === false`, `FORMATS` excludes it
 and `encoders.ts` throws with the reason plus the code to restore. **Re-enabling
 it requires fixing the build first, not just uncommenting.**
 
+#### Hypothesis for Sprint 2.2 (not a finding — untested)
+
+Two unrelated packages, icodec and `@jsquash`, both stall Turbopack on AVIF and
+on nothing else. That points at **the AVIF encoder build itself rather than
+either package's wrapper** — the common ancestor is the same Squoosh/libavif +
+aom emscripten output.
+
+One refinement to the framing, since it changes what to test: the AVIF *glue JS*
+is not large — `avif_enc.js` is 39,621 B, comparable to `mozjpeg_enc.js` at
+38,422 B. What is multi-megabyte is the **`.wasm` the glue references**
+(`avif_enc.wasm` 3.3 MB, `avif_enc_mt.wasm` 3.5 MB, and 8 MB in icodec's build).
+So the suspicion is the bundler resolving and emitting those referenced binaries
+once the glue enters the module graph, not parsing the glue.
+
+**The corollary is the useful part.** pngquant is every bit as much an emscripten
+/ wasm-bindgen artefact, and it does *not* stall — because it is vendored and
+loaded as raw bytes, so its `.wasm` never enters the module graph at all. That is
+the one structural difference between the codec that stalls and the codecs that
+do not.
+
+So the first thing Sprint 2.2 should try for AVIF is the treatment PNG already
+gets: vendor `avif_enc.wasm` under `/public/wasm/`, import the encoder glue in a
+way that never lets the bundler resolve its `.wasm` neighbour, and hand over a
+compiled `WebAssembly.Module`. If that builds, the hypothesis holds and the fix
+is uniform across every codec. If it still stalls, the cause is in the glue after
+all and this note is wrong — which is worth knowing quickly and cheaply.
+
 ### Benchmark
 
 Fixture set: the eight files from the Patch 1.1 canvas baseline, regenerated from
