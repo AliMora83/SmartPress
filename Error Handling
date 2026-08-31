@@ -1,108 +1,86 @@
-# Error Handling — SmartPress Compression API
+# Error Handling — SmartPress
 
-> Scope: Backend error model for:
-> 1) FFmpeg pipeline stabilisation (large videos)
-> 2) Unsupported formats and invalid media [page:1]
+> Rewritten in Sprint 1.3. The previous version described a FastAPI backend's JSON error
+> envelope for an FFmpeg video pipeline. Both are gone: the backend left with Sprint 1.1 and
+> video with it. Every failure now happens on the user's own device.
 
-SmartPress needs **predictable, typed errors** so the Next.js frontend can render clear UX states and logs can be meaningfully analysed (Cloud Logging / Gemini).
+The plan's cross-cutting rule is that **errors are typed UX states, never generic crashes or
+silent failures**. The model that implements it lives in [`lib/errors.ts`](./lib/errors.ts).
 
 ---
 
-## 1. Error Model Overview
+## 1. The model
 
-Every failure response from the FastAPI backend should follow a consistent JSON shape:
+There is no HTTP status and no server, so a failure is a plain value:
 
-```json
-{
-  "error_code": "UNSUPPORTED_FORMAT",
-  "http_status": 415,
-  "message": "This video format is not supported yet.",
-  "detail": "Optional technical details or truncated ffmpeg stderr.",
-  "retryable": false
+```ts
+interface AppError {
+  code: ErrorCode;        // stable identifier
+  message: string;        // what went wrong, in the user's terms
+  remediation?: string;   // what they can do about it
+  retryable: boolean;     // whether Retry could plausibly succeed unchanged
 }
 ```
 
-### 1.1. Fields
-
-- `error_code`  
-  Short, stable identifier used by frontend and observability (e.g. `FILE_TOO_LARGE`, `FFMPEG_TIMEOUT`).
-
-- `http_status`  
-  HTTP status actually returned by the API.
-
-- `message`  
-  User-facing message safe to show in the UI.
-
-- `detail`  
-  Developer-facing context (truncated stderr, internal code, or diagnostics). Can be omitted or hidden from end users.
-
-- `retryable`  
-  Indicates whether the client should offer a “Try again” option or not.
+`retryable` drives the UI directly: the Retry button renders only when it is `true`. Offering
+Retry on a file that will never decode is a lie the previous model told by omission — v2
+declared the flag in its spec and never implemented it.
 
 ---
 
-## 2. Canonical Error Codes & Statuses
+## 2. The codes
 
-### 2.1. Client Errors (4xx)
+| Code | Cause | `retryable` | Surfaces as |
+|---|---|---|---|
+| `UNSUPPORTED_FORMAT` | Dropped file is not JPEG or PNG | no | Error row on add, before any work |
+| `FILE_TOO_LARGE` | Input above `MAX_INPUT_BYTES` (100 MB) | no | Error row on add |
+| `DECODE_FAILED` | `createImageBitmap` rejected — truncated, misnamed, or corrupt | no | Error row after the decode stage |
+| `ENCODE_FAILED` | The wasm encoder threw | yes | Error row, with the raw detail appended |
+| `CODEC_UNAVAILABLE` | A `/wasm/` binary did not load, or the format is disabled in this build | yes | Error row, scoped to that row |
+| `OUT_OF_MEMORY` | Allocation failed decoding or encoding | yes | Error row |
 
-| error_code              | http_status | Typical Cause                                    | Retryable |
-|-------------------------|------------|--------------------------------------------------|-----------|
-| `FILE_TOO_LARGE`        | 413        | Upload exceeds configured max size               | false     |
-| `EMPTY_UPLOAD`          | 400        | 0 bytes received                                 | false     |
-| `UNSUPPORTED_FORMAT`    | 415        | Container or codec not supported by pipeline     | false     |
-| `CORRUPT_MEDIA`         | 400        | `ffprobe` / FFmpeg cannot read input reliably    | false     |
-| `INVALID_REQUEST`       | 400        | Missing fields, bad query params, etc.           | false     |
-
-### 2.2. Server Errors (5xx)
-
-| error_code              | http_status | Typical Cause                                      | Retryable |
-|-------------------------|------------|----------------------------------------------------|-----------|
-| `FFMPEG_TIMEOUT`        | 504        | FFmpeg exceeded max allowed processing time        | true      |
-| `FFMPEG_FAILURE`        | 500        | Non-zero FFmpeg exit for valid input               | maybe     |
-| `STORAGE_ERROR`         | 507 / 500  | Unable to write/read temp or GCS object            | true      |
-| `INTERNAL_ERROR`        | 500        | Unhandled exceptions, misconfig, unexpected state  | maybe     |
-
-Gemini can help refine this list and propose additional codes specifically for Google Cloud / Cloud Run scenarios.
+`CODEC_UNAVAILABLE` covers AVIF: `CAPABILITIES.avif.available === false`, so nothing can
+select it, and `encoders.ts` throws with the reason if something tries.
 
 ---
 
-## 3. Mapping FFmpeg / ffprobe Output to Error Codes
+## 3. Classification crosses a worker boundary
 
-### 3.1. ffprobe Validation Step
+Encoding runs in a worker, and `postMessage` cannot carry an `Error` instance — the worker
+flattens it to `"${name}: ${message}"`. So `classify()` matches on that **string**, not on
+`instanceof`. Anything that changes an error message shape can therefore change its
+classification silently.
 
-Before running FFmpeg, the backend should validate the uploaded file using `ffprobe`. Common failure cases:
+That is not hypothetical. Sprint 1.3 changed the wasm loader to build absolute URLs (see
+§5), which turned `Failed to load /wasm/x.wasm` into
+`Failed to load http://host/wasm/x.wasm` and dropped a `CODEC_UNAVAILABLE` into the generic
+`ENCODE_FAILED` bucket until the matcher was widened to `/wasm/`. **Test the classification,
+not just the throw.**
 
-- Non-media file or unknown format.  
-- Truncated / corrupt container.  
-- Extremely long duration beyond configured limits.
-
-**If `ffprobe` fails:**
-
-- Map to `CORRUPT_MEDIA` if stderr indicates parsing issues.  
-- Map to `UNSUPPORTED_FORMAT` if stderr indicates unknown format/codec.  
-- Include stderr tail (truncated) in `detail`.
-
-### 3.2. FFmpeg Execution Step
-
-When FFmpeg fails, classify the error using stderr patterns:
-
-Examples (non-exhaustive):
-
-- “Unknown encoder” / “Unknown decoder” → `UNSUPPORTED_FORMAT`.  
-- “Invalid data found when processing input” → `CORRUPT_MEDIA`.  
-- “Cannot allocate memory” / “Cannot write” → `STORAGE_ERROR`.  
-- GPU/accel errors (if used later) → new dedicated codes if needed.
-
-This is a great place for **Gemini** to help:
-
-- Given FFmpeg stderr, propose a **mapping function**:
-  - Input: raw stderr (or last N lines).  
-  - Output: `error_code`, suggested `message`, `retryable` flag, and remediation hints.
+Order matters inside `classify()`: memory exhaustion surfaces through several unrelated
+messages and is checked before the generic buckets can claim it.
 
 ---
 
-## 4. UX States in Next.js Frontend
+## 4. Cancellation is not a failure
 
-The frontend should treat these error codes as **state**, not just text.
+Removing a row or clearing the queue terminates the worker running that file, because a wasm
+encode has no yield point to check a flag. The pool rejects the caller's promise with
+`CancelledError`, and the UI checks `isCancelled(e)` and returns without rendering anything
+— the row it belonged to no longer exists.
 
-### 
+A cancelled job must still **settle** its promise. Before Sprint 1.3 the pool terminated the
+worker and left the caller awaiting forever.
+
+---
+
+## 5. What "no network" means for errors
+
+There are no request failures to model, with one exception: the vendored `.wasm` binaries are
+fetched from `/wasm/` on the same origin at first use of a format. That fetch is the only
+network call the app makes after load, and its failure is `CODEC_UNAVAILABLE` — scoped to the
+row that needed it, never a global blocking state. A JPEG still compresses when the PNG
+binary is missing.
+
+A failed load does **not** poison the cache: `loader.ts` deletes the pending entry on
+rejection, so Retry re-fetches rather than replaying the failure.

@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored third-party code -- not ours to lint or restyle. Provenance
+    // and modifications are recorded in public/wasm/PROVENANCE.md.
+    "lib/codecs/vendor/**",
   ]),
 ]);
 

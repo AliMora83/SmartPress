@@ -10,7 +10,9 @@ const montserrat = Montserrat({
 
 export const metadata: Metadata = {
   title: "SmartPress - Fast, Smart Compression",
-  description: "Fast, smart compression for images and video.",
+  // Video left with Sprint 1.1. The description says what the app does now.
+  description:
+    "Fast, smart image compression that runs entirely in your browser. No uploads, no accounts.",
   icons: {
     icon: "/favicon.ico",
   },

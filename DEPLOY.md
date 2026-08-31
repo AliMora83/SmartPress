@@ -15,8 +15,10 @@ npm run build
 The build output is a standard Next.js bundle. Any static host or Node host will serve it.
 Production target is **namka.cloud** at [smartpress.namka.cloud](https://smartpress.namka.cloud).
 
-CI (`.github/workflows/deploy.yml`) runs `npm ci`, `npm run build`, and `npm run lint` on
-every push to `main`.
+CI (`.github/workflows/ci.yml`) runs `npm ci`, `npm run build`, and `npm run lint` on
+every push to `main` and on pull requests targeting it. **It does not deploy** — the file
+was called `deploy.yml` until Sprint 1.3 and never deployed anything. Deployment is
+whatever the host is configured to do with `main`.
 
 ## Notes
 

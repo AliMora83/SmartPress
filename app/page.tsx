@@ -1,5 +1,6 @@
 import Compressor from "@/components/Compressor";
 import Image from "next/image";
+import Link from "next/link";
 import { version } from "../package.json";
 
 export default function Home() {
@@ -50,6 +51,28 @@ export default function Home() {
             <span className="text-[10px] md:text-xs font-bold text-slate-400 tracking-widest uppercase" style={{ fontFamily: 'var(--font-montserrat)' }}>
               Version {version}
             </span>
+          </div>
+
+          {/* SmartPress is GPLv3 and ships vendored GPL binaries to the browser,
+              so the notices and the source have to be reachable from the running
+              app -- not only from the repository. */}
+          <div className="text-[10px] md:text-xs text-slate-400" style={{ fontFamily: 'var(--font-montserrat)' }}>
+            <Link href="/licenses" className="hover:text-slate-600 transition-colors underline underline-offset-2">
+              GPLv3
+            </Link>
+            <span className="mx-1.5">·</span>
+            <a
+              href="https://github.com/AliMora83/SmartPress"
+              rel="noopener noreferrer"
+              target="_blank"
+              className="hover:text-slate-600 transition-colors underline underline-offset-2"
+            >
+              Source
+            </a>
+            <span className="mx-1.5">·</span>
+            <Link href="/licenses" className="hover:text-slate-600 transition-colors underline underline-offset-2">
+              Notices
+            </Link>
           </div>
         </div>
       </div>
