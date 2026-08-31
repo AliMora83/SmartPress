@@ -14,12 +14,12 @@
   "live_url": "https://smartpress.namka.cloud",
   "deploy_target": "Static frontend — namka.cloud",
   "agents": ["Claude", "Comet"],
-  "version": "3.0.0-alpha.3",
+  "version": "3.0.0-beta.1",
   "last_push": {
-    "timestamp": "2026-08-31T08:29:17Z",
+    "timestamp": "2026-08-31T12:55:14Z",
     "actor": "AliMora83",
-    "commit_message": "chore: merge PROJECT-SYNC.json bot commit from origin",
-    "sha": "c985c21"
+    "commit_message": "Merge sprint/1.3-integration: Phase 1 complete",
+    "sha": "d8875ec"
   },
   "last_updated": "2026-08-31"
 }
