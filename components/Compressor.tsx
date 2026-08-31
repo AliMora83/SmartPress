@@ -13,14 +13,32 @@ import type { Format, PngMode } from "@/lib/codecs";
 import { appError, classify, MAX_INPUT_BYTES, type AppError } from "@/lib/errors";
 
 /**
- * Phase 1 hands back the format it was given -- conversion is Sprint 2.4 -- so
- * the accept filter is the set of formats we can both read and write. Deriving
- * it from the capability table rather than a literal list is what keeps an
- * unavailable codec (AVIF today) from ever being offered: Sprint 2.2 restores it
- * by flipping `available`, and nothing here changes.
+ * What the dropzone accepts, behind two independent gates.
+ *
+ * **Gate 1 -- product scope.** Phase 1 hands back the format it was given, so a
+ * format is only worth accepting if we would return it unchanged in kind.
+ * Conversion is Sprint 2.4. WebP is the reason this list exists rather than
+ * being derived: `CAPABILITIES.webp.available` is `true` and WebP encodes
+ * correctly today, but exposing it needs a conversion UI, filename handling and
+ * a transparency decision, so it stays out until 2.4. Deriving purely from
+ * `available` would put it in the dropzone tomorrow.
+ *
+ * **Gate 2 -- capability.** Whatever survives gate 1 is still filtered on the
+ * descriptor, so a format the build cannot encode can never be offered even if
+ * someone adds it to the list above. That is the gate that keeps AVIF out today.
+ *
+ * **Restoring AVIF in Sprint 2.2 is therefore two edits, deliberately:**
+ *   1. `available: true` on `CAPABILITIES.avif` -- after fixing the Turbopack
+ *      build stall, not instead of fixing it (see `encoders.ts`).
+ *   2. add `"avif"` to this list, which is the statement that Phase 2 wants it
+ *      offered to users.
+ *
+ * They are separate because they answer different questions: *can* we encode
+ * it, and *should* we offer it. Collapsing them into one flag would take WebP
+ * with it.
  */
-const INPUT_FORMATS: Format[] = ["jpeg", "png"];
-const ACCEPTED_FORMATS = INPUT_FORMATS.filter(f => CAPABILITIES[f].available !== false);
+const PHASE1_INPUT_FORMATS: Format[] = ["jpeg", "png"];
+const ACCEPTED_FORMATS = PHASE1_INPUT_FORMATS.filter(f => CAPABILITIES[f].available !== false);
 const ACCEPTED_TYPES = ACCEPTED_FORMATS.map(f => CAPABILITIES[f].mimeType);
 const ACCEPT_ATTR = ACCEPTED_TYPES.join(",");
 const ACCEPTED_LABEL = ACCEPTED_FORMATS
@@ -37,6 +55,14 @@ const ACCEPTED_LABEL = ACCEPTED_FORMATS
  * than half-migrating them, so a stale queue cannot come back.
  */
 const SETTINGS_KEY = "smartpress:settings:v2";
+/**
+ * v1 keys, deleted on first load rather than migrated.
+ *
+ * These are strings to *remove*, not strings the app uses, so a grep sweep for
+ * stale v2 or video references must leave them alone -- `smartpress_video_crf`
+ * in particular is a dead key from the FFmpeg era, and deleting this line would
+ * resurrect it in the stores of everyone who ran that build.
+ */
 const LEGACY_KEYS = ["smartpress_files", "smartpress_image_quality", "smartpress_video_crf"];
 
 interface Settings {

@@ -1,4 +1,4 @@
-name: SmartPress CI/CD
+name: CI
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: npm ci
 
-    - name: Build Frontend
+    - name: Build
       run: npm run build
 
     - name: Run Lint
