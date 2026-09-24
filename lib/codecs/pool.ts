@@ -39,7 +39,7 @@ export interface CompressResult {
     encodeMs: number;
     /** PDF only. */
     pageCount?: number;
-    pdfNote?: "signed" | "flatten-not-smaller";
+    pdfNote?: "signed" | "flatten-not-smaller" | "flatten-failed";
 }
 
 /**

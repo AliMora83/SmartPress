@@ -22,7 +22,7 @@ export type WorkerResponse =
     | { id: string; type: "progress"; stage: "decoding" | "encoding"; progress: number }
     | {
         id: string; type: "done"; bytes: ArrayBuffer; byteLength: number; decodeMs: number; encodeMs: number;
-        pageCount?: number; pdfNote?: "signed" | "flatten-not-smaller";
+        pageCount?: number; pdfNote?: "signed" | "flatten-not-smaller" | "flatten-failed";
     }
     | { id: string; type: "error"; error: string };
 

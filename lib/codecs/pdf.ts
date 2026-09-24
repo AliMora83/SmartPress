@@ -41,8 +41,13 @@ export class PdfCorruptError extends Error {
 export interface PdfCompressResult {
     bytes: Uint8Array;
     pageCount: number;
-    /** "signed" = left untouched, on purpose. "flatten-not-smaller" = level 3 was tried and lost to level 2. */
-    note?: "signed" | "flatten-not-smaller";
+    /**
+     * "signed" = left untouched, on purpose. "flatten-not-smaller" = level 3
+     * was tried and lost to level 2. "flatten-failed" = level 3 was
+     * attempted and threw -- the row must say so, not quietly land on level 2
+     * as if flattening had simply not helped.
+     */
+    note?: "signed" | "flatten-not-smaller" | "flatten-failed";
 }
 
 /** Long-edge cap for embedded images, matching the Sprint 2.1 spike -- a
@@ -292,16 +297,26 @@ export async function compressPdf(
 
     onProgress?.(80, "encoding");
     let flattened: Uint8Array | null = null;
+    let flattenFailed = false;
     try {
         const { flattenPdf } = await import("./pdfFlatten");
         flattened = await flattenPdf(bytes, options);
     } catch {
-        flattened = null; // flattening is opt-in extra; a failure here must not fail a compression that already succeeded at level 2
+        // A failed flatten must not fail a compression that already
+        // succeeded at level 2 -- but it must not be silently swallowed
+        // either. The row gets "flatten-failed" below, distinct from
+        // "flatten-not-smaller", so it reads as "we couldn't" rather than
+        // "we tried and it wasn't worth it".
+        flattenFailed = true;
     }
     onProgress?.(100, "encoding");
 
     if (flattened && flattened.byteLength < recompressed.byteLength) {
         return { bytes: flattened, pageCount };
     }
-    return { bytes: recompressed, pageCount, note: flattened ? "flatten-not-smaller" : undefined };
+    return {
+        bytes: recompressed,
+        pageCount,
+        note: flattenFailed ? "flatten-failed" : flattened ? "flatten-not-smaller" : undefined,
+    };
 }

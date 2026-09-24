@@ -109,7 +109,7 @@ interface FileItem {
     saved?: "written" | "sent";
     /** PDF only, set once compression completes. */
     pageCount?: number;
-    pdfNote?: "signed" | "flatten-not-smaller";
+    pdfNote?: "signed" | "flatten-not-smaller" | "flatten-failed";
 }
 
 const STATUS_CONFIG: Record<FileStatus, { label: string; color: string; icon: typeof Clock }> = {
@@ -509,6 +509,11 @@ export default function Compressor() {
                             {fileItem.pdfNote === "flatten-not-smaller" && (
                                 <p className="text-xs text-gray-400 pl-[22px]">
                                     Flattening wouldn&rsquo;t save more — text kept selectable.
+                                </p>
+                            )}
+                            {fileItem.pdfNote === "flatten-failed" && (
+                                <p className="text-xs text-amber-600 pl-[22px]">
+                                    Flattening failed — text kept selectable.
                                 </p>
                             )}
                         </div>
