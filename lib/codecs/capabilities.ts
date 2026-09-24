@@ -51,6 +51,23 @@ export const CAPABILITIES: Readonly<Record<Format, CodecCapability>> = {
         approxWasmBytes: 3_485_872,
         available: false,
     },
+    pdf: {
+        format: "pdf",
+        mimeType: "application/pdf",
+        extension: "pdf",
+        // Recompressing embedded images is lossy; cleanup alone (no images
+        // found, or "keep text selectable" leaves an already-clean file) is
+        // not. Marked lossy for the same reason PNG is: the default path is.
+        lossy: true,
+        control: "quality",
+        // No wasm of its own -- embedded images route through the jpeg
+        // encoder above, already counted there. This is pdf-lib's JS bundle
+        // (~448KB) plus, only when a page actually gets flattened,
+        // pdfjs-dist (~316KB + its vendored worker). Reused as a rough
+        // "how much loads" hint the way wasm size is used for images.
+        wasm: [],
+        approxWasmBytes: 448_000,
+    },
 } as const;
 
 /** Every known format, including unavailable ones. */

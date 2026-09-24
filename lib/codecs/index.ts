@@ -39,6 +39,7 @@ export function formatFromMime(mime: string): Format | null {
         case "image/png": return "png";
         case "image/webp": return "webp";
         case "image/avif": return "avif";
+        case "application/pdf": return "pdf";
         default: return null;
     }
 }

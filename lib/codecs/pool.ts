@@ -37,6 +37,9 @@ export interface CompressResult {
     bytes: Uint8Array;
     decodeMs: number;
     encodeMs: number;
+    /** PDF only. */
+    pageCount?: number;
+    pdfNote?: "signed" | "flatten-not-smaller";
 }
 
 /**
@@ -123,6 +126,8 @@ export class CodecPool {
                     bytes: new Uint8Array(msg.bytes),
                     decodeMs: msg.decodeMs,
                     encodeMs: msg.encodeMs,
+                    pageCount: msg.pageCount,
+                    pdfNote: msg.pdfNote,
                 });
             } else {
                 waiting.reject(new Error(msg.error));

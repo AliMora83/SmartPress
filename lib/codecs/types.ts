@@ -1,5 +1,5 @@
 /** Formats the codec layer can encode to. */
-export type Format = "jpeg" | "png" | "webp" | "avif";
+export type Format = "jpeg" | "png" | "webp" | "avif" | "pdf";
 
 /**
  * What the universal 0-10 control means for a codec.
@@ -55,6 +55,13 @@ export interface EncodeOptions {
      * Nothing in the product path passes it.
      */
     nativeOverride?: number;
+    /**
+     * PDF only. On (the default) keeps levels 1-2: cleanup plus recompressing
+     * embedded images, text stays selectable. Off additionally tries level 3
+     * (flatten each page to an image via pdfjs-dist) and keeps whichever
+     * result is smaller. Ignored by every other format.
+     */
+    keepTextSelectable?: boolean;
 }
 
 export interface ImageDataLike {

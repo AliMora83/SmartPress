@@ -115,11 +115,23 @@ async function makePng(): Promise<Encoder> {
     };
 }
 
+/**
+ * PDF never reaches this factory. `worker.ts` branches to `compressPdf()`
+ * before calling `encode()` at all -- a PDF's embedded JPEGs go through
+ * `makeJpeg()` above directly, the same encoder any standalone JPEG uses.
+ * This entry exists only so `Format` including "pdf" doesn't leave the
+ * `Record` incomplete.
+ */
+async function makePdfPlaceholder(): Promise<Encoder> {
+    throw new Error("pdf is not encoded via getEncoder() -- see lib/codecs/pdf.ts");
+}
+
 const FACTORIES: Record<Format, () => Promise<Encoder>> = {
     jpeg: makeJpeg,
     png: makePng,
     webp: makeWebp,
     avif: makeAvif,
+    pdf: makePdfPlaceholder,
 };
 
 export function getEncoder(format: Format): Promise<Encoder> {

@@ -140,6 +140,10 @@ export function nativeQuality(format: Format, scale: number): number {
         case "png": return pngQuality(scale);
         case "webp": return webpQuality(scale);
         case "avif": return avifQuality(scale);
+        case "pdf": throw new Error(
+            "nativeQuality: pdf has no curve of its own -- embedded images are " +
+            "recompressed via resolveNative(\"jpeg\", options), same as any JPEG.",
+        );
     }
 }
 

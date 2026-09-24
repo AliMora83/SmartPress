@@ -20,7 +20,10 @@ export type WorkerRequest = {
 
 export type WorkerResponse =
     | { id: string; type: "progress"; stage: "decoding" | "encoding"; progress: number }
-    | { id: string; type: "done"; bytes: ArrayBuffer; byteLength: number; decodeMs: number; encodeMs: number }
+    | {
+        id: string; type: "done"; bytes: ArrayBuffer; byteLength: number; decodeMs: number; encodeMs: number;
+        pageCount?: number; pdfNote?: "signed" | "flatten-not-smaller";
+    }
     | { id: string; type: "error"; error: string };
 
 const post = (msg: WorkerResponse, transfer?: Transferable[]) =>
@@ -29,6 +32,30 @@ const post = (msg: WorkerResponse, transfer?: Transferable[]) =>
 self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
     const { id, file, format, options } = e.data;
     try {
+        // PDF is not "decode pixels, encode pixels" -- it is its own pipeline
+        // (cleanup, recompress embedded images, optionally flatten), entirely
+        // behind lib/codecs/pdf.ts. Dynamically imported here, not at module
+        // load, so an image-only batch never pulls pdf-lib into this worker.
+        if (format === "pdf") {
+            post({ id, type: "progress", stage: "decoding", progress: 5 });
+            const { compressPdf } = await import("./pdf");
+            const t0 = performance.now();
+            const result = await compressPdf(file, options, (progress, stage) =>
+                post({ id, type: "progress", stage, progress }));
+            const t1 = performance.now();
+            const buf = result.bytes.buffer.slice(
+                result.bytes.byteOffset, result.bytes.byteOffset + result.bytes.byteLength,
+            ) as ArrayBuffer;
+            post(
+                {
+                    id, type: "done", bytes: buf, byteLength: result.bytes.byteLength,
+                    decodeMs: 0, encodeMs: t1 - t0, pageCount: result.pageCount, pdfNote: result.note,
+                },
+                [buf],
+            );
+            return;
+        }
+
         post({ id, type: "progress", stage: "decoding", progress: 5 });
         const t0 = performance.now();
         const image = await decode(file);
