@@ -100,35 +100,22 @@ See `AI-Logs.md` for the full entry.
 
 *Goal: the thing you'd actually reach for instead of an online tool.*
 
-### Sprint 2.1 — PDF, Route A
+### Sprint 2.1 — PDF, Route A ✅
 
-MIT-licensed, narrow, fully under your control. This is also where the Image/PDF mode
-toggle from the old plan belongs — PDF is what actually needs mode-scoped loading, so
-it ships with the feature that requires it rather than ahead of it.
-
-**Tasks**
-
-- [ ] Home screen mode toggle: **Image** | **PDF**. Mode-scoped codec loading — Image
-      mode never fetches PDF machinery, and vice versa.
-- [ ] **Filter, not gate.** A PDF dropped in Image mode offers to switch modes or flags
-      that row — it is never silently rejected. Real drop validation, since v2's
-      drag-and-drop bypassed the `accept` filter entirely.
-- [ ] `pdf-lib@1.17.1` (MIT) to parse and rewrite documents.
-- [ ] Walk page resources for image XObjects using `DCTDecode` — those are raw JPEG byte
-      streams. Extract → re-encode through MozJPEG → swap back.
-- [ ] Downsample above a DPI threshold. This, not re-encoding, is where most of the
-      savings live in scanned documents.
-- [ ] Strip metadata; enable object streams on save.
-- [ ] **Be honest about coverage in the UI.** Route A won't touch `FlateDecode` images,
-      fonts, CCITT fax, or JPEG2000. When a PDF barely shrinks, say why instead of
-      reporting a disappointing number with no explanation.
-- [ ] Document the Route B escape hatch (MuPDF `1.28.0`, AGPL-3.0) in `AI-Logs.md` — fine
-      for a personal offline tool, a licensing problem if SmartPress is ever hosted or
-      sold. Not implemented here; recorded so the decision isn't re-litigated later.
-
-**Done when:** switching modes changes the settings panel and what loads over the wire
-(verifiable in the Network tab), and a scanned multi-page PDF shrinks substantially and
-still renders correctly in Preview, Acrobat, and Chrome.
+`pdf-lib` (MIT) for levels 1–2 (cleanup, recompress embedded `/DCTDecode` and 8bpc
+`/FlateDecode` images — the `/SMask`-skip bug found in the measured fixture table cost
+DIS-Odoo Inventory Guide 68 points of savings before it was fixed), `pdfjs-dist` (Apache
+2.0) for an opt-in level 3 that flattens to images and keeps whichever result is
+smaller. Mode-scoped loading shipped as `format === "pdf"` gating a dynamic import in
+`worker.ts` rather than the planned Image/PDF toggle — same outcome (an image-only batch
+never fetches PDF machinery), no toggle state to keep in sync with the queue. Password,
+corrupt, and signed PDFs are typed states, not crashes; a signed PDF is returned
+byte-for-byte untouched rather than risk invalidating a signature `pdf-lib` has no notion
+of. Route B (MuPDF, AGPL-3.0) is documented, not implemented, per the task list. "Honest
+coverage" is done for signed/flatten cases but not yet for a PDF that's legitimately
+dense with `/JPXDecode` or `/CCITTFaxDecode` images — flagged as a known gap rather than
+guessed at without a fixture that hits it. Full detail, including the three
+`document`-in-a-Worker bugs the level 3 flatten needed fixed, in `AI-Logs.md`.
 
 ---
 

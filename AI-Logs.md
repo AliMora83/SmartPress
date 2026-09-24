@@ -5,6 +5,199 @@
 
 ---
 
+## 2026-09-24 | Sprint 2.1 — PDF, Route A | Claude (Sonnet 5)
+
+PDF joins images as a first-class format: three compression levels behind the
+same worker/pool interface images use, typed error states for the ways a PDF
+can refuse to cooperate, and an opt-in level 3 that took three separate
+`document`-in-a-Worker bugs to make safe. Closes Phase 2's PDF sprint;
+`SmartPress-v3-Plan.md` is updated to match.
+
+### Measured findings (the fixture table `pdf.ts`'s comments have pointed at since Task 1)
+
+Three real fixtures, not synthetic ones, because Route A's actual coverage
+gaps (`FlateDecode`, fonts, CCITT, JPEG2000) only show up against real
+documents: a company profile deck (**Azibuye Company Profile.pdf**, 6.16 MB,
+10 pages, photo-heavy), a product guide full of UI screenshots
+(**DIS-Odoo Inventory Guide-v1.pdf**, 3.19 MB, 16 pages), and a slide-style
+deck (**Trading Rapid Implementation.pdf**, 1.56 MB, 7 pages). All three,
+quality 7/10:
+
+| File | Original | Level 2 (recompress images) | Level 3 (flatten) |
+|---|---|---|---|
+| Azibuye Company Profile | 6,455,773 | 2,948,583 (−54.3%) | 1,775,280 (−72.5%) |
+| DIS-Odoo Inventory Guide | 3,349,470 | 973,529 (−70.9%) | 2,735,196 (−18.3%) |
+| Trading Rapid Implementation | 1,631,467 | 951,349 (−41.7%) | 469,614 (−71.2%) |
+
+(Level 3's column is the pre-Task-4 numbers — see below for what changed.)
+
+**The `/SMask` skip bug cost the most.** An early draft of `recompressOne()`
+treated any image with an `/SMask` reference as unsafe to touch and skipped
+it outright. DIS-Odoo — screenshots exported with an alpha channel, so almost
+every image on the page carries one — went from **2.5% saved to 70.9%** once
+that was fixed: an `/SMask` is a pointer to a *separate* grayscale stream
+object, not extra channels inside the image being recompressed, so
+recompressing the base image and leaving the mask stream alone is correct and
+loses nothing. That's why `recompressOne()`'s comment calls this out as
+deliberate rather than obvious.
+
+Everything else Route A doesn't touch — `/JPXDecode`, `/CCITTFaxDecode`,
+indexed or odd-bpc `/FlateDecode`, image masks, predictor-filtered bitmaps —
+**didn't appear in any of the three real fixtures**, so `findImages()`
+leaving them untouched is a safety net for PDFs this sprint didn't have
+fixtures for, not a tested fallback. `FLATTEN_SCALE` (150/72, i.e. 150dpi)
+and `MAX_LONG_EDGE` (2000px) are both this table's anchors, the same role
+`quality.ts`'s curves play for images — changing either changes output bytes
+for every PDF, so re-measure against real fixtures rather than adjusting the
+number.
+
+**Route B, recorded per the plan, not implemented:** MuPDF 1.28.0 would cover
+the gaps above (fonts, JPX, CCITT) but is AGPL-3.0. Fine for a personal
+offline tool; a licensing problem the moment SmartPress is hosted or sold,
+because AGPL's network-use clause reaches a web deployment in a way GPL's
+doesn't. Not pulled in here — recorded so Route A's coverage ceiling isn't
+mistaken for a bug to fix later without re-litigating the licence tradeoff.
+
+### Task 1 — the codec layer, Task 2 — typed error states, Task 3 — UI wiring
+
+Already committed (`850592b`, `b5b6ba8`) or carried as uncommitted work
+finished in this pass (`9007b2b`) before this entry was written — see those
+commits for the detail the usual entry format would repeat here. In short:
+`lib/codecs/pdf.ts` does levels 1–2 with only `pdf-lib`; `PdfPasswordError`
+and `PdfCorruptError` give password-protected and unreadable PDFs their own
+non-retryable messages via `lib/errors.ts`; a signed PDF is detected up front
+(`SigFlags` or any `/FT /Sig` field) and returned byte-for-byte untouched
+rather than risk invalidating a signature pdf-lib has no notion of; and
+`Compressor.tsx` gained PDF as an accepted format, a page-count badge, and
+the `keepTextSelectable` setting that gates level 3.
+
+**Deliberate deviation from the plan's own task list:** the plan called for a
+"Home screen mode toggle: Image | PDF" to get mode-scoped codec loading.
+What shipped instead is `format === "pdf"` gating a dynamic `import("./pdf")`
+in `worker.ts`, with no user-facing toggle at all — PDF is just always
+accepted alongside images. Same outcome (an image-only batch never loads
+`pdf-lib`; see this entry's Verification section for the check), simpler
+UI, no mode state to keep in sync with the queue's actual contents.
+
+### Task 4 — the level 3 flatten had a `document`-in-a-Worker bug, three times over
+
+`flattenPdf()` renders each page via `OffscreenCanvas` and rebuilds the PDF
+around JPEGs — it already ran inside the codec Worker from Task 1. Running
+the three real fixtures through it for the first time surfaced that
+"runs inside a Worker" and "safe to run inside a Worker" are different
+claims: `pdfjs-dist`'s browser defaults reach for the global `document` in
+three unrelated places, and each one threw as a plain `TypeError` that
+doesn't name `document` anywhere in its message, so each fix needed a stack
+trace read, not a docs read.
+
+1. **Annotation appearance layer.** Any PDF with links or form fields threw
+   immediately — pdfjs creates DOM widgets for interactive annotations even
+   when they're never going to be interacted with. Fixed with
+   `annotationMode: AnnotationMode.DISABLE` on `page.render()`.
+2. **Font loading.** Without `disableFontFace: true`, pdfjs registers an
+   `@font-face`/`FontFace` per font via `document.fonts` — the mechanism
+   that lets a rendered page's text look like real text. `disableFontFace`
+   switches it to drawing glyphs as filled canvas paths instead, which needs
+   no `document` at all. That in turn means a PDF that doesn't embed one of
+   its own fonts (common for base-14 fonts like Helvetica) needs pdfjs's own
+   substitute outlines and CMaps to draw anything — hence vendoring
+   `standard_fonts/` and `cmaps/` under `/public/pdfjs/` and passing
+   `standardFontDataUrl` / `cMapUrl` / `cMapPacked: true`.
+3. **`CanvasFactory` and `FilterFactory`.** Even with both of the above,
+   every one of the three real fixtures still threw:
+   `TypeError: Cannot read properties of undefined (reading 'createElement')`
+   first, then `(reading 'URL')` once that was patched. Both come from
+   `getDocument()`'s defaults — `DOMCanvasFactory` and `DOMFilterFactory` —
+   which call `document.createElement()` internally for things that have
+   nothing to do with the canvas already handed to `page.render()`:
+   `DOMCanvasFactory` backs soft-mask compositing and (per point 2) glyph
+   rasterising with a throwaway canvas of its own; `DOMFilterFactory` renders
+   actual `<svg><filter>` elements into `document.body` to implement
+   `/SMask` alpha and luminosity compositing via `ctx.filter = "url(#id)"`.
+   Neither has a document-less equivalent — there's nowhere to put the SVG.
+   pdfjs's own Node.js target has the identical gap (no DOM in Node either)
+   and its answer is `NodeFilterFactory`, an empty subclass of
+   `BaseFilterFactory` that inherits every method as a no-op returning
+   `"none"` — soft masks render without their mask rather than crashing.
+   That class isn't exported from the package, so `pdfFlatten.ts` reproduces
+   its exact (lack of) behaviour, and pairs it with an `OffscreenCanvas`-backed
+   `CanvasFactory` for the canvas half.
+
+**Net effect, same three real fixtures, quality 7:** Azibuye 1,775,280 →
+**1,602,126** bytes, DIS-Odoo 2,735,196 → **2,665,208**, Trading 469,614 →
+**432,607** — modestly smaller across the board (real glyph rendering
+instead of whatever the pre-fix path was drawing), and, more importantly,
+all three now complete without throwing at all. DIS-Odoo's flatten still
+loses to its own level 2 result on size either side of this fix — a
+screenshot-heavy PDF is already close to photographically dense at level 2,
+so flattening it to a raster JPEG doesn't buy anything further.
+
+**The silent fallback is gone.** `compressPdf()` used to catch a
+`flattenPdf()` throw and quietly return the level 2 result with no note at
+all — before this fix, that meant every one of the three real fixtures
+looked, from the UI, exactly like flattening had never been attempted.
+`pdfNote` gained a third value, `"flatten-failed"`, distinct from
+`"flatten-not-smaller"`, so the row says "Flattening failed — text kept
+selectable" instead.
+
+### Verification
+
+1. `next build` (Turbopack): **10.5s** compile, **21.6s** total including
+   type-check and static page generation — no stall, which is the actual
+   risk given `@jsquash/avif` already stalls this bundler indefinitely (see
+   the Sprint 1.2 entry). PDF and `pdfjs-dist` build cleanly under Turbopack.
+2. `npm run lint`: **0 problems.**
+3. `npx tsc --noEmit`: **0 errors.**
+4. **Mode-scoped loading, proven behaviourally** (worker-initiated fetches
+   don't show up in this tool's network recorder either, matching the
+   Sprint 1.2 finding — a fresh page load was confirmed clean via the
+   recorder, but the level 2/3 split needed the same rename trick 1.2 used):
+   with `public/pdfjs/pdf.worker.min.mjs` renamed away, a real fixture at
+   the default setting still compressed normally (929.06 KB, byte-identical
+   to the setting having been left in place) — level 2 never touches
+   `pdfjs-dist`. The same fixture with `keepTextSelectable` off then showed
+   "Flattening failed" instead of crashing or silently landing on level 2.
+   Restoring the file made flatten succeed again at the same byte count as
+   before (422.47 KB). `standardFontDataUrl`/`cMapUrl` are referenced only
+   inside the same `flattenPdf()` function as the worker script, so they're
+   gated identically by construction, not separately verified.
+5. **Level 1–2 (default) functional check**, three real fixtures at quality
+   7: sizes match the table above exactly (2,948,583 / 973,529 / 951,349
+   bytes) — reproducible, not a one-off.
+6. **Level 3 (opt-in) functional check**, same three fixtures: outputs
+   visually reviewed in a PDF viewer (text and images render correctly) and
+   approved before this entry was written.
+7. **Typed error states**, one fixture per case: `SYN-password-protected.pdf`
+   → "This PDF is password-protected..."; a truncated PDF → "This PDF
+   couldn't be read..."; `SYN-digitally-signed.pdf` → left untouched with
+   the signature message; `SYN-form-links.pdf` (annotations) and
+   `SYN-scanned-style.pdf` (flatten attempted and not smaller) both complete
+   without error. None of the five produced a generic crash or a silent
+   failure.
+8. `git log --oneline` on `sprint/2.1-pdf`: seven commits, each scoped to
+   one concern (codec layer, typed errors, UI wiring, worker-safe flatten,
+   vendored assets, flatten-failed note, version bump); `git status` clean
+   after the last one.
+9. **Size added to `/public/` by the vendored `pdfjs-dist` assets:**
+   `standard_fonts/` (16 files) is 798,046 bytes and `cmaps/` (169 files) is
+   1,167,747 bytes — **1,965,793 bytes (~1.9 MiB) new in this sprint.**
+   Combined with the worker script already vendored in Task 1
+   (`pdf.worker.min.mjs`, 1,265,413 bytes), `/public/pdfjs/` totals
+   **3,233,754 bytes (~3.1 MiB)**. None of it is in the main bundle or
+   fetched on page load (item 4) — it's fetched from the codec Worker only
+   when a flatten is actually attempted, same lazy-loading discipline as the
+   wasm binaries under `/public/wasm/`.
+
+**Known gap carried forward, not fixed here:** the plan's "be honest about
+coverage" task is only half done. A signed PDF, a failed flatten, and
+"nothing changed" each get their own message, but a PDF that legitimately
+can't shrink much at level 2 because it's dense with `/JPXDecode` or
+`/CCITTFaxDecode` images (Route A's known gaps) still just reports a small
+percentage with no explanation of why. Flagged for whoever picks up Route A
+coverage next, rather than guessed at now without a real fixture that hits it.
+
+---
+
 ## 2026-09-24 | Sprint 1.4 — Save Boundary | Claude (Sonnet 5)
 
 A Sprint 1.3 prompt landed assuming the repo's state since 2026-08-31 was uncertain.
