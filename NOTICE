@@ -58,6 +58,18 @@ BSD-3-Clause (Google Inc.).
 
 ---
 
+## Vendored pdfjs-dist assets
+
+Redistributed under `/public/pdfjs/` (worker script, standard font
+substitutes, CMap tables) and served to the browser at runtime for the PDF
+Level 3 flatten path. See `public/pdfjs/PROVENANCE.md` for what's there and
+how to regenerate it.
+
+`pdfjs-dist` v6.3.289 — <https://github.com/mozilla/pdf.js>
+Apache-2.0 (Mozilla).
+
+---
+
 ## npm dependencies
 
 Codec packages from the [jSquash](https://github.com/jamsinclair/jSquash)
