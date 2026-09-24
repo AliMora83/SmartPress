@@ -5,6 +5,170 @@
 
 ---
 
+## 2026-09-24 | Sprint 1.4 — Save Boundary | Claude (Sonnet 5)
+
+A Sprint 1.3 prompt landed assuming the repo's state since 2026-08-31 was uncertain.
+Task 0 audited it read-only and found 1.3 already merged to `main` — Tasks 1–4 and 6
+from that prompt were done, verified, and logged (see the entry below, unedited).
+The two real gaps were `downloadAll()`'s reliability, which 1.3 explicitly punted on,
+and the save/codec boundary, which had never been built. This sprint is those two,
+plus reconciling the docs to a plan that has changed shape since 1.3: **ZIP is
+cancelled**, and Phase 2/3 are renumbered around PDF, AVIF, format conversion, and a
+Tauri desktop build.
+
+### Audit correction
+
+`sprint/1.3-integration` existed locally and on `origin`, already merged into `main`
+(`d8875ec`). Canvas bridge gone, codec layer wired into `Compressor.tsx`, v2 server
+code (`useJobPoller`, `compressOnServer`, `API_URL`, `jobId`, the `"server"` mode)
+absent from a full-tree grep, IndexedDB settings-only, `/licenses` live, JPEG curve at
+native 75 for scale 7. `package.json` was already `3.0.0-beta.1`. Main-thread
+responsiveness re-measured against the production build at `/bench`: worst stall 9ms,
+zero `longtask` entries across the full fixture set — decode already runs in the
+worker, so the concern the original prompt raised didn't apply.
+
+Two loose ends from that audit, closed here:
+
+- **`front.png` (~3.96 MB), named as the worst-case fixture, does not exist anywhere
+  in this repo** and never did. `P1.png` (~1.07 MB, the largest real fixture) is the
+  worst case from here on — noted in `SmartPress-v3-Plan.md` so it isn't rediscovered.
+- **`.avif-probe/`**, an untracked 3.6 MB spike copy of the app sitting ungitignored in
+  the repo root, was polluting a whole-tree `npm run lint` (64 errors, all vendored
+  code Sprint 1.3's `eslint.config.mjs` never had reason to ignore, since it didn't
+  know this directory existed). Moved outside the repo entirely, to
+  `../avif-probe-archive/` — sibling to `smart-compressor/`, not inside it. Flagged
+  for Sprint 2.2, since it's AVIF-build spike material and that's where the Turbopack
+  stall actually gets fixed.
+
+### Task 7 — the save boundary
+
+`lib/codecs/` was already clean: `pool.run()` returns `{ bytes, decodeMs, encodeMs }`
+and nothing about saving. The boundary that didn't exist was between the *app* and
+saving — `Compressor.tsx` built its own Blob, its own long-lived Blob URL per row, its
+own anchor elements, inline.
+
+Moved all of it to `lib/save/` behind a `Saver` interface (`saveOne`, `saveAll`), with
+`lib/save/web.ts` as the only implementation today:
+
+- `FileItem` now carries `resultBlob?: Blob` instead of a pre-created `downloadLink`
+  Blob URL. The row never creates a URL for its result at all — `lib/save/web.ts`
+  creates one transiently per save action and revokes it 10s later rather than on the
+  next tick, since revoking immediately has been observed elsewhere to cancel a
+  download that hasn't started reading yet.
+- The single per-row Download control changed from a real `<a href download>` to a
+  button calling `saver.saveOne()`, so single-file save goes through the same module
+  as the batch path — otherwise the boundary would be real for two of three saving
+  concerns and not the third.
+- `Compressor.tsx` went from creating/revoking a result Blob URL per row to owning
+  none of that; it only reads outcomes (`written` / `sent` / `failed`) back from the
+  `Saver` and renders them.
+
+**A latent purity bug in the existing `elapsed` timer surfaced during this refactor.**
+`renderStatusIndicator` called `Date.now()` directly during render — always wrong, but
+apparently not reachable by eslint-plugin-react-hooks's `react-hooks/purity` rule
+until this file's shape changed enough for its analysis to walk that far. Not a
+regression this sprint introduced; fixed anyway, since a build with `npm run lint`
+returning an *error* fails this sprint's own acceptance bar. Fixed by moving the clock
+read into the existing 500ms interval effect (`nowMs` state) instead of reading it in
+`renderStatusIndicator`; the counter's behaviour is unchanged (updates every 500ms
+while busy).
+
+### Task 5 — `downloadAll()`, decided
+
+Built on Task 7: `webSaver.saveAll()` picks the strategy.
+
+- **Chromium (`showDirectoryPicker` present):** one folder picked once via a real
+  user gesture, then `dir.getFileHandle(name, { create: true })` →
+  `createWritable()` → `write(blob)` → `close()` per file. Each of those is a promise
+  that rejects on a real failure (quota, revoked permission, disk full) — a genuine
+  per-file success signal, not an inference. A picker cancellation
+  (`AbortError`) reports `{ mode: "cancelled" }` and does not fall back to firing
+  anchor downloads instead — silently replacing "you clicked Cancel" with eight
+  surprise downloads would be worse than doing nothing.
+- **Everywhere else, or if the picker call itself fails for some other reason:** the
+  1.3 fallback, unchanged in behaviour — staggered anchor clicks 300ms apart, chained
+  rather than scheduled up front so a backgrounded tab's coalesced timers can't fire
+  them all at once, with an honest "sent, not confirmed" notice.
+- Every row's own Download button stays visible in both cases, per the 1.3 decision
+  this sprint is closing out.
+
+**Verified behaviourally, not just read** (a real OS directory-picker dialog can't be
+driven from browser automation, so `window.showDirectoryPicker` was mocked in-page
+with an in-memory handle that records what it's asked to write — this exercises the
+actual `saveAllToDirectory()` code path, not a stand-in for it):
+
+- Full success: 2 files, both written, byte counts matched the compressor's own
+  output exactly (57,441 / 15,220 bytes). Notice: "Saved 2 of 2 files to your folder."
+- Partial failure: one `getFileHandle` call made to throw. Result: 1 written, 1
+  failed, notice named the failed file, and — a real bug caught by this test — the
+  failed row was still showing "Saved to folder" from an *earlier successful* run
+  until fixed to clear a row's `saved` state on a failed retry rather than only ever
+  setting it.
+- Cancellation: picker throws `AbortError`. Result: `{ mode: "cancelled" }`, neutral
+  notice, no anchors fired, both rows kept their prior state untouched (correct — a
+  cancelled picker means no attempt was made on any file, unlike a per-file failure).
+- Fallback path re-verified with `showDirectoryPicker` deleted from `window`:
+  sequential dispatch, amber "sent to your browser" notice, per-row buttons intact.
+
+**`showDirectoryPicker`'s per-file promises are a reliable signal** — this was the
+condition under which the original prompt asked to stop and ask before proceeding.
+They weren't unreliable, so this sprint didn't stop.
+
+### Doc reconciliation
+
+- `PROJECT-SYNC.json` and `.github/workflows/generate-project-sync.yml` deleted.
+  **Not touched:** `AG-Update.md`, a spec for a separate cross-repo dashboard project
+  that polls `/PROJECT-SYNC.json` from seven repos including this one — deleting the
+  file here means that dashboard's SmartPress card will 404 (it degrades per-repo by
+  its own design, so this shouldn't break the dashboard, only blank one card). Flagged
+  rather than fixed, since `AG-Update.md` isn't this repo's own documentation.
+- `SmartPress-v3-Plan.md` rewritten: Phase 1 sprints 1.1–1.4 marked done and
+  compressed to summaries (full detail stays in this file); Phase 2 renumbered to
+  2.1 PDF / 2.2 AVIF / 2.3 format conversion; Phase 3 renumbered to 3.1 UI redesign
+  (shared codebase, web + Tauri) / 3.2 Hostinger deploy / 3.3 Tauri desktop app. ZIP
+  removed from the version-milestones table, decision gates, and known risks; the old
+  PDF Route A detail (Sprint 3.2) and PWA detail (Sprint 3.1) were relocated rather
+  than dropped, into the new 2.1 and 3.1 respectively.
+- `CLAUDE.md`: new "Saving is a separate layer from compressing" section documenting
+  the `Saver` interface and the ZIP cancellation. It had no "ZIP makes it moot" line
+  to remove — that phrasing was in `AI-Logs.md`'s 1.3 entry, which stays as written.
+- `package-lock.json`'s root `"version"` (stale at `3.0.0-alpha.3`) fixed via
+  `npm install --package-lock-only`, no dependency changes.
+- Bumped `3.0.0-beta.1` → **`3.0.0-beta.2`**.
+
+**Left alone, listed rather than touched, per instruction:** twelve unrelated branches
+on `origin` from what looks like a different, automated workflow (Netlify/Cloud
+Run/video-perf tooling, not this plan) — corrected from "eight" in this sprint's own
+Task 0 audit, which undercounted them —
+`configure-cloud-run-deployment-16160941949625094776`,
+`enable-ai-panel-18173201185073607634`,
+`fix-blocking-compress-video-8403481463251808759`,
+`optimize-preview-generation-6223700370319669638`,
+`optimize-video-analysis-polling-3476505406273383762`,
+`perf-async-file-upload-12259952863800562529`,
+`perf-compress-concurrency-17031960316395049479`,
+`perf-optimize-async-analyze-video-15485091967985340846`, and four more under a
+`perf/` prefix (`async-sleep-fix-8743722115146672861`,
+`fix-blocking-ffmpeg-8266961301954695722`,
+`optimize-preview-generation-8909084090226268186`,
+`skip-video-preview-1714888696648951237`).
+
+### Verification
+
+1. `next build`: **17.9s**, against 1.2's logged 17.59s and 1.3's 17.63s — no
+   regression from the save-layer refactor.
+2. `npm run lint`: **0 problems** (the `.avif-probe/` noise is gone with the move;
+   the purity and exhaustive-deps issues surfaced mid-refactor are fixed, not
+   suppressed).
+3. `downloadAll()`: both paths demonstrated above, plus the single-row `saveOne()`
+   path (no console errors, row marked "Sent to downloads").
+4. `/licenses`: reachable from the main page, production build, unchanged from 1.3.
+5. Main entry bundle: routes unchanged (`/`, `/_not-found`, `/bench`, `/icon.png`,
+   `/licenses`), all static; `lib/save/` is a page-load import, not lazy, since every
+   page that can compress can also need to save.
+
+---
+
 ## 2026-08-31 | Sprint 1.3 — Integration & Cleanup | Claude (Opus 5)
 
 Phase 1 closes. The codec layer replaces the canvas bridge, the v2 server code is
