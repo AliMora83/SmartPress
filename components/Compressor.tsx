@@ -514,7 +514,7 @@ export default function Compressor() {
                     >
                         <Upload className={`mb-4 transition-transform ${dragActive ? "scale-125" : ""}`} size={48} color={dragActive ? "#3b82f6" : "#6b7280"} />
                         <p className="text-lg font-medium text-gray-700 text-center">
-                            {dragActive ? "Drop files here" : "Click or drag files to upload"}
+                            {dragActive ? "Drop files here" : "Click or drag files to add them"}
                         </p>
                         <p className="text-sm text-gray-400 mt-2 text-center">
                             Images ({ACCEPTED_LABEL}) • Multiple files supported

@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   title: "SmartPress - Fast, Smart Compression",
   // Video left with Sprint 1.1. The description says what the app does now.
   description:
-    "Fast, smart image compression that runs entirely in your browser. No uploads, no accounts.",
+    "Fast, smart image compression that runs entirely in your browser. Files never leave your device, no accounts.",
   icons: {
     icon: "/favicon.ico",
   },
