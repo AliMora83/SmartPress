@@ -16,7 +16,9 @@ export type ErrorCode =
     | "DECODE_FAILED"
     | "ENCODE_FAILED"
     | "CODEC_UNAVAILABLE"
-    | "OUT_OF_MEMORY";
+    | "OUT_OF_MEMORY"
+    | "PDF_PASSWORD_PROTECTED"
+    | "PDF_CORRUPT";
 
 export interface AppError {
     code: ErrorCode;
@@ -38,8 +40,8 @@ export const MAX_INPUT_BYTES = 100 * 1024 * 1024;
 
 const ERRORS: Record<ErrorCode, Omit<AppError, "code">> = {
     UNSUPPORTED_FORMAT: {
-        message: "Unsupported file type — SmartPress accepts JPEG and PNG.",
-        remediation: "Convert the file to JPEG or PNG first, or wait for PDF support.",
+        message: "Unsupported file type — SmartPress accepts JPEG, PNG and PDF.",
+        remediation: "Convert the file to JPEG, PNG or PDF first.",
         retryable: false,
     },
     FILE_TOO_LARGE: {
@@ -67,6 +69,15 @@ const ERRORS: Record<ErrorCode, Omit<AppError, "code">> = {
         remediation: "Close other tabs, or compress fewer files at once.",
         retryable: true,
     },
+    PDF_PASSWORD_PROTECTED: {
+        message: "This PDF is password-protected. Remove the password and try again.",
+        retryable: false,
+    },
+    PDF_CORRUPT: {
+        message: "This PDF couldn't be read.",
+        remediation: "It may be truncated or damaged. Try opening it in a PDF viewer first.",
+        retryable: false,
+    },
 };
 
 export function appError(code: ErrorCode, detail?: string): AppError {
@@ -83,6 +94,12 @@ export function appError(code: ErrorCode, detail?: string): AppError {
 export function classify(err: unknown): AppError {
     const raw = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     const text = raw.toLowerCase();
+
+    // Matched on the thrown error's `.name` -- lib/codecs/pdf.ts's
+    // PdfPasswordError/PdfCorruptError are the only things that throw these,
+    // so there's no ambiguity with the generic buckets below.
+    if (text.includes("pdfpassworderror")) return appError("PDF_PASSWORD_PROTECTED");
+    if (text.includes("pdfcorrupterror")) return appError("PDF_CORRUPT");
 
     if (text.includes("out of memory") || text.includes("allocation failed")
         || text.includes("rangeerror") || text.includes("array buffer")) {
