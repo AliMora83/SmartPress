@@ -124,6 +124,24 @@ Every `.wasm` binary is vendored into `/public` and imported from a local path. 
 `unpkg.com`, which is exactly what made offline impossible. A new external fetch is a bug,
 not a shortcut.
 
+## Saving is a separate layer from compressing
+
+`lib/codecs/` returns encoded bytes and timing and knows nothing else. Every way
+SmartPress hands a result to the user — the single Download button, `downloadAll()`,
+the directory-picker path — lives behind the `Saver` interface in `lib/save/`
+(`lib/save/web.ts` today), not in `Compressor.tsx` and not in the codec layer. This
+boundary was settled in Sprint 1.4, specifically so the desktop build in Sprint 3.3
+can write files straight to disk through the same interface, with nothing above
+`lib/save/` needing to change.
+
+`downloadAll()` is the permanent web delivery path — **ZIP is cancelled.** Chromium
+gets `showDirectoryPicker()`: one folder picked once, every file written through
+`FileSystemWritableFileStream`, so success is known per file, not guessed at. Every
+other browser falls back to staggered anchor clicks, which report nothing back — that
+fallback is not a stopgap for a ZIP sprint that no longer exists, it is what those
+browsers get indefinitely. Either path leaves every row's own Download button visible,
+because neither path can guarantee a file actually landed.
+
 ## Working rules
 
 - **Single source of truth for version:** `package.json`. Everything else reads from it —

@@ -11,6 +11,8 @@ import { getPool, isCancelled, type Stage } from "@/lib/codecs/pool";
 import { CAPABILITIES, DEFAULT_QUALITY, DEFAULT_PNG_MODE, formatFromMime } from "@/lib/codecs";
 import type { Format, PngMode } from "@/lib/codecs";
 import { appError, classify, MAX_INPUT_BYTES, type AppError } from "@/lib/errors";
+import { webSaver } from "@/lib/save/web";
+import type { SaveAllResult, SaveItem } from "@/lib/save/types";
 
 /**
  * What the dropzone accepts, behind two independent gates.
@@ -89,14 +91,14 @@ interface FileItem {
     startedAt?: number;
     /** Object URL for the thumbnail. Revoked with the row. */
     preview?: string;
-    /** Object URL for the result. One per row, revoked with the row. */
-    downloadLink?: string;
+    /** The encode result, or the original file if it wasn't worth keeping. Handed to lib/save/ verbatim -- this row never creates a Blob URL for it. */
+    resultBlob?: Blob;
     error?: AppError;
     originalSize?: number;
     newSize?: number;
     alreadyOptimal?: boolean;
-    /** Whether a download for this row has been handed to the browser. */
-    dispatched?: boolean;
+    /** How this row's result was last handed off, once lib/save/ has done it. */
+    saved?: "written" | "sent";
 }
 
 const STATUS_CONFIG: Record<FileStatus, { label: string; color: string; icon: typeof Clock }> = {
@@ -112,6 +114,10 @@ const STAGE_LABEL: Record<Stage, string> = {
     encoding: "Compressing",
 };
 
+/** Only files SmartPress actually re-encoded carry the prefix. */
+const outputName = (f: FileItem) =>
+    f.alreadyOptimal ? f.file.name : `smartpress_${f.file.name}`;
+
 const formatBytes = (bytes: number) => {
     if (bytes === 0) return "0 Bytes";
     const k = 1024;
@@ -119,8 +125,6 @@ const formatBytes = (bytes: number) => {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 };
-
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 // --- Main Component ---
 
@@ -130,18 +134,25 @@ export default function Compressor() {
     const [dragActive, setDragActive] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
     const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-    /** Names handed to the browser by the last Download All, for the notice. */
-    const [lastBatch, setLastBatch] = useState<string[] | null>(null);
-    /** Ticks only while something is running, so the elapsed counters move. */
-    const [, setTick] = useState(0);
+    /** Outcome of the last Download All, for the notice. lib/save/ produced it. */
+    const [lastBatch, setLastBatch] = useState<SaveAllResult | null>(null);
+    /**
+     * The clock, read only inside the effect below and never during render --
+     * render must be a pure function of props/state, and `Date.now()` isn't.
+     * Starts `null` rather than a render-time `Date.now()` call for the same
+     * reason; the effect sets it before anything needs to show elapsed time.
+     */
+    const [nowMs, setNowMs] = useState<number | null>(null);
 
     const pool = getPool();
 
     // --- Object URL lifetime ---
-    // Every URL a row owns -- thumbnail and result -- is created once and revoked
-    // exactly once, on row removal, queue clear, or unmount. Never during render,
-    // or a URL could die between render and click. Never persisted: a URL from a
-    // previous page session is already dead (Patch 1.1a).
+    // The thumbnail preview is the only Blob URL a row owns. The result never
+    // gets one here -- it stays a Blob and lib/save/ decides how (or whether)
+    // to turn it into a URL, which is what keeps that decision out of this
+    // component. Created once and revoked exactly once, on row removal, queue
+    // clear, or unmount; never persisted, since a URL from a previous page
+    // session is already dead (Patch 1.1a).
     const revokedRef = useRef<Set<string>>(new Set());
     const revoke = useCallback((url?: string) => {
         if (!url || !url.startsWith("blob:")) return;
@@ -151,7 +162,6 @@ export default function Compressor() {
     }, []);
     const releaseRow = useCallback((f: FileItem) => {
         revoke(f.preview);
-        revoke(f.downloadLink);
     }, [revoke]);
 
     // Mirror files into a ref so cleanup and batch handlers read current state
@@ -203,7 +213,11 @@ export default function Compressor() {
     const busy = files.some(f => f.status === "processing" || f.status === "queued");
     useEffect(() => {
         if (!busy) return;
-        const t = setInterval(() => setTick(n => n + 1), 500);
+        // Not seeded synchronously on entry -- setState directly in an effect
+        // body cascades a render. The first tick is at most 500ms away, and
+        // until then `elapsed` reads 0, which the label already treats the
+        // same as "just started".
+        const t = setInterval(() => setNowMs(Date.now()), 500);
         return () => clearInterval(t);
     }, [busy]);
 
@@ -276,17 +290,14 @@ export default function Compressor() {
         const format = item.format;
         const cap = CAPABILITIES[format];
 
-        // Recompressing replaces the result, so release the previous blob first.
-        // Done here rather than inside a state updater, which must stay pure.
-        revoke(item.downloadLink);
         pool.cancel(id);
 
         setFiles(prev => prev.map(f => f.id === id ? {
             ...f,
             status: "queued", progress: 0, stage: undefined,
             startedAt: Date.now(), error: undefined,
-            downloadLink: undefined, newSize: undefined,
-            alreadyOptimal: undefined, dispatched: undefined,
+            resultBlob: undefined, newSize: undefined,
+            alreadyOptimal: undefined, saved: undefined,
         } : f));
 
         try {
@@ -314,7 +325,7 @@ export default function Compressor() {
             setFiles(prev => prev.map(f => f.id === id ? {
                 ...f,
                 status: "done", progress: 100, stage: undefined,
-                downloadLink: URL.createObjectURL(output),
+                resultBlob: output,
                 originalSize: item.file.size,
                 newSize: output.size,
                 alreadyOptimal: !worthIt,
@@ -328,7 +339,7 @@ export default function Compressor() {
                 ? { ...f, status: "error", progress: 0, stage: undefined, error }
                 : f));
         }
-    }, [pool, revoke]);
+    }, [pool]);
 
     const compressAll = useCallback(() => {
         // Dispatched together, not awaited in sequence: the pool is what decides
@@ -338,48 +349,53 @@ export default function Compressor() {
             .forEach(f => { void compressFile(f.id); });
     }, [compressFile]);
 
-    // --- Download ---
+    // --- Save ---
+    // Everything below hands off to lib/save/web.ts and does nothing else with
+    // the result -- no Blob URL, no anchor, no filesystem call happens in this
+    // component. That boundary is what lets a desktop build swap in its own
+    // Saver in Sprint 3.3 without touching this file.
 
-    /** Only files SmartPress actually re-encoded carry the prefix. */
-    const outputName = (f: FileItem) =>
-        f.alreadyOptimal ? f.file.name : `smartpress_${f.file.name}`;
+    const toSaveItem = useCallback((f: FileItem): SaveItem => ({
+        blob: f.resultBlob!,
+        filename: outputName(f),
+        originalSize: f.originalSize ?? f.file.size,
+        newSize: f.newSize ?? f.resultBlob!.size,
+        status: f.alreadyOptimal ? "original" : "compressed",
+    }), []);
 
-    const dispatchDownload = useCallback((item: FileItem) => {
-        if (!item.downloadLink) return;
-        const link = document.createElement("a");
-        link.href = item.downloadLink;
-        link.download = outputName(item);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        setFiles(prev => prev.map(f => f.id === item.id ? { ...f, dispatched: true } : f));
-    }, []);
+    const saveRow = useCallback(async (id: string) => {
+        const item = filesRef.current.find(f => f.id === id);
+        if (!item?.resultBlob) return;
+        const { outcome } = await webSaver.saveOne(toSaveItem(item));
+        if (outcome === "failed") return;
+        setFiles(prev => prev.map(f => f.id === id ? { ...f, saved: outcome } : f));
+    }, [toSaveItem]);
 
     /**
-     * Staggered per-row downloads. ZIP is Sprint 2.3.
-     *
-     * The stagger is chained rather than scheduled up front: `setTimeout(fn,
-     * i * 300)` for every row at once collapses into simultaneous clicks in a
-     * backgrounded tab, because the timers coalesce.
-     *
-     * The browser tells the page nothing about what happened next -- an anchor
-     * click reports no success, no failure, and no permission decision. So this
-     * does not claim the files arrived; it records what was handed over and says
-     * so, and every row keeps its own download control.
+     * "Download All", permanent now that ZIP is cancelled. Chromium gets a
+     * folder picked once with every file written directly and success known
+     * per file; everywhere else falls back to staggered anchor clicks, which
+     * report nothing back. Either way every row keeps its own save control,
+     * and this only records what lib/save/ tells it -- it never claims a file
+     * arrived that it doesn't have a "written" or "sent" outcome for.
      */
     const downloadAll = useCallback(async () => {
-        const ready = filesRef.current.filter(f => f.status === "done" && f.downloadLink);
+        const ready = filesRef.current.filter(f => f.status === "done" && f.resultBlob);
         if (!ready.length) return;
         setLastBatch(null);
-        for (let i = 0; i < ready.length; i++) {
-            if (i) await sleep(300);
-            // The row may have been removed mid-run; re-read rather than trusting
-            // the snapshot, or we click a URL that has already been revoked.
-            const live = filesRef.current.find(f => f.id === ready[i].id);
-            if (live?.downloadLink) dispatchDownload(live);
-        }
-        if (ready.length > 1) setLastBatch(ready.map(outputName));
-    }, [dispatchDownload]);
+        const result = await webSaver.saveAll(ready.map(toSaveItem));
+        const outcomeByName = new Map(result.results.map(r => [r.filename, r.outcome]));
+        setFiles(prev => prev.map(f => {
+            if (f.status !== "done" || !f.resultBlob) return f;
+            const outcome = outcomeByName.get(outputName(f));
+            if (!outcome) return f;
+            // A failed retry must drop any stale "saved" label from an earlier
+            // attempt -- otherwise this row would claim success on a run that
+            // just failed it.
+            return { ...f, saved: outcome === "failed" ? undefined : outcome };
+        }));
+        setLastBatch(result);
+    }, [toSaveItem]);
 
     // --- Row rendering ---
 
@@ -411,8 +427,8 @@ export default function Compressor() {
                 // stage-based and would sit at 25% for seconds. An indeterminate
                 // bar plus a running clock reads as working; a frozen percentage
                 // reads as hung.
-                const elapsed = fileItem.startedAt
-                    ? Math.max(0, Math.round((Date.now() - fileItem.startedAt) / 1000))
+                const elapsed = fileItem.startedAt && nowMs
+                    ? Math.max(0, Math.round((nowMs - fileItem.startedAt) / 1000))
                     : 0;
                 const stage = fileItem.stage ?? "decoding";
                 return (
@@ -480,7 +496,7 @@ export default function Compressor() {
     };
 
     const anyPending = files.some(f => f.status === "pending");
-    const anyDone = files.some(f => f.status === "done" && f.downloadLink);
+    const anyDone = files.some(f => f.status === "done" && f.resultBlob);
 
     return (
         <div className={`w-full h-full ${files.length === 0 ? 'min-h-[50vh] md:min-h-screen flex items-center justify-center' : 'py-6 md:p-12'}`}>
@@ -498,7 +514,7 @@ export default function Compressor() {
                     >
                         <Upload className={`mb-4 transition-transform ${dragActive ? "scale-125" : ""}`} size={48} color={dragActive ? "#3b82f6" : "#6b7280"} />
                         <p className="text-lg font-medium text-gray-700 text-center">
-                            {dragActive ? "Drop files here" : "Click or drag files to upload"}
+                            {dragActive ? "Drop files here" : "Click or drag files to add them"}
                         </p>
                         <p className="text-sm text-gray-400 mt-2 text-center">
                             Images ({ACCEPTED_LABEL}) • Multiple files supported
@@ -632,37 +648,74 @@ export default function Compressor() {
                         </div>
 
                         {/*
-                          A multi-file download is handed to the browser one file at a
-                          time and the browser reports nothing back -- not success, not
-                          the permission prompt, not a refusal. Rather than call that a
-                          success, say what was sent and leave every row downloadable.
+                          What this says depends entirely on which Saver ran. The
+                          directory path gets a real per-file result, so a full
+                          success is worded as one; the anchor fallback never gets
+                          more than "handed to the browser", because that is all it
+                          ever knows. Either way every row keeps its own save control.
                         */}
-                        {lastBatch && (
-                            <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
-                                <Info size={16} className="text-amber-600 mt-0.5 flex-shrink-0" />
-                                <div className="flex-1 text-sm text-amber-900">
-                                    <p className="font-bold">
-                                        Sent {lastBatch.length} files to your browser.
-                                    </p>
-                                    <p className="mt-1 text-xs leading-relaxed">
-                                        Browsers ask permission before saving several files at once, and
-                                        if that prompt was dismissed the rest were dropped without telling
-                                        this page. Check your downloads folder for the files below —
-                                        anything missing can be downloaded again from its own row.
-                                    </p>
-                                    <ul className="mt-2 text-xs font-mono space-y-0.5">
-                                        {lastBatch.map(name => <li key={name}>{name}</li>)}
-                                    </ul>
+                        {lastBatch && (() => {
+                            const { mode, results } = lastBatch;
+                            const failed = results.filter(r => r.outcome === "failed");
+                            const trivial = mode !== "cancelled" && failed.length === 0 && results.length <= 1;
+                            if (trivial) return null;
+
+                            const tone = mode === "cancelled" || failed.length > 0 ? "amber" : "emerald";
+                            const colors = tone === "amber"
+                                ? { bg: "bg-amber-50", border: "border-amber-200", icon: "text-amber-600", text: "text-amber-900", hover: "hover:bg-amber-100", dismiss: "text-amber-700" }
+                                : { bg: "bg-emerald-50", border: "border-emerald-200", icon: "text-emerald-600", text: "text-emerald-900", hover: "hover:bg-emerald-100", dismiss: "text-emerald-700" };
+
+                            return (
+                                <div className={`mb-4 ${colors.bg} border ${colors.border} rounded-lg p-4 flex items-start gap-3`}>
+                                    <Info size={16} className={`${colors.icon} mt-0.5 flex-shrink-0`} />
+                                    <div className={`flex-1 text-sm ${colors.text}`}>
+                                        {mode === "cancelled" ? (
+                                            <>
+                                                <p className="font-bold">Folder selection was cancelled — nothing was saved.</p>
+                                                <p className="mt-1 text-xs leading-relaxed">
+                                                    Nothing was written to disk. Use each file&rsquo;s own Download
+                                                    button below, or try Download All again.
+                                                </p>
+                                            </>
+                                        ) : mode === "directory" ? (
+                                            <>
+                                                <p className="font-bold">
+                                                    Saved {results.length - failed.length} of {results.length} files to your folder.
+                                                </p>
+                                                {failed.length > 0 && (
+                                                    <p className="mt-1 text-xs leading-relaxed">
+                                                        {failed.length} could not be written — use that row&rsquo;s own
+                                                        Download button to retry: {failed.map(f => f.filename).join(", ")}
+                                                    </p>
+                                                )}
+                                            </>
+                                        ) : (
+                                            <>
+                                                <p className="font-bold">
+                                                    Sent {results.length} files to your browser.
+                                                </p>
+                                                <p className="mt-1 text-xs leading-relaxed">
+                                                    Browsers ask permission before saving several files at once, and
+                                                    if that prompt was dismissed the rest were dropped without telling
+                                                    this page. Check your downloads folder for the files below —
+                                                    anything missing can be downloaded again from its own row.
+                                                </p>
+                                                <ul className="mt-2 text-xs font-mono space-y-0.5">
+                                                    {results.map(r => <li key={r.filename}>{r.filename}</li>)}
+                                                </ul>
+                                            </>
+                                        )}
+                                    </div>
+                                    <button
+                                        onClick={() => setLastBatch(null)}
+                                        className={`p-1 ${colors.hover} rounded transition flex-shrink-0`}
+                                        aria-label="Dismiss"
+                                    >
+                                        <X size={14} className={colors.dismiss} />
+                                    </button>
                                 </div>
-                                <button
-                                    onClick={() => setLastBatch(null)}
-                                    className="p-1 hover:bg-amber-100 rounded transition flex-shrink-0"
-                                    aria-label="Dismiss"
-                                >
-                                    <X size={14} className="text-amber-700" />
-                                </button>
-                            </div>
-                        )}
+                            );
+                        })()}
 
                         <div className="space-y-3">
                             {files.map(fileItem => (
@@ -721,30 +774,26 @@ export default function Compressor() {
                                                         <RefreshCw size={12} /> Retry
                                                     </button>
                                                 )}
-                                                {fileItem.status === "done" && fileItem.downloadLink && (
+                                                {fileItem.status === "done" && fileItem.resultBlob && (
                                                     fileItem.alreadyOptimal ? (
-                                                        <a
-                                                            href={fileItem.downloadLink}
-                                                            download={outputName(fileItem)}
-                                                            onClick={() => setFiles(prev => prev.map(f => f.id === fileItem.id ? { ...f, dispatched: true } : f))}
+                                                        <button
+                                                            onClick={() => saveRow(fileItem.id)}
                                                             className="text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2 transition inline-flex items-center gap-1 font-medium"
                                                         >
                                                             <Download size={12} /> Download original
-                                                        </a>
+                                                        </button>
                                                     ) : (
-                                                        <a
-                                                            href={fileItem.downloadLink}
-                                                            download={outputName(fileItem)}
-                                                            onClick={() => setFiles(prev => prev.map(f => f.id === fileItem.id ? { ...f, dispatched: true } : f))}
+                                                        <button
+                                                            onClick={() => saveRow(fileItem.id)}
                                                             className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded transition inline-flex items-center gap-1 font-bold uppercase tracking-wider"
                                                         >
                                                             <Download size={14} /> Download
-                                                        </a>
+                                                        </button>
                                                     )
                                                 )}
-                                                {fileItem.dispatched && fileItem.status === "done" && (
+                                                {fileItem.saved && fileItem.status === "done" && (
                                                     <span className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">
-                                                        Sent to downloads
+                                                        {fileItem.saved === "written" ? "Saved to folder" : "Sent to downloads"}
                                                     </span>
                                                 )}
                                             </div>
