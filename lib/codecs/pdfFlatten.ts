@@ -15,12 +15,83 @@
  * fetched from a CDN, same rule and same reason as the wasm binaries in
  * loader.ts: Turbopack ships this codec worker as a `blob:` URL in
  * production, so a root-relative path has no origin to resolve against
- * unless built into an absolute one first.
+ * unless built into an absolute one first. The standard font data and CMaps
+ * under /public/pdfjs/standard_fonts/ and /public/pdfjs/cmaps/ are vendored
+ * for the same reason -- see public/pdfjs/PROVENANCE.md.
+ *
+ * `disableFontFace: true` is what keeps this worker-safe for every PDF, not
+ * just the ones with embedded fonts: without it, pdfjs's font loader calls
+ * the global `document` (via the FontFace/@font-face path) to register glyph
+ * outlines, and `document` does not exist inside a Worker. With it, pdfjs
+ * draws every glyph as a filled canvas path instead, which only needs the
+ * OffscreenCanvas context already in hand. A PDF that doesn't embed one of
+ * its fonts then needs pdfjs's own standard-font substitutes and CMaps to
+ * shape and draw glyphs correctly, which is what `standardFontDataUrl` and
+ * `cMapUrl` supply.
  */
 import type { EncodeOptions } from "./types";
 import { resolveAssetUrl } from "./loader";
 
 const FLATTEN_SCALE = 150 / 72; // 150dpi, matching the Sprint 2.1 spike
+
+/**
+ * `getDocument()`'s default `CanvasFactory` is `DOMCanvasFactory`, which calls
+ * `document.createElement("canvas")` -- used internally for soft masks,
+ * patterns and (per the `disableFontFace` path above) glyph-path rasterising,
+ * regardless of the canvas already handed to `page.render()`. `document` does
+ * not exist in a Worker, so without this override every flatten throws
+ * `Cannot read properties of undefined (reading 'createElement')` the moment
+ * pdfjs needs a canvas of its own. This mirrors `DOMCanvasFactory`'s shape
+ * (`create`/`reset`/`destroy`) with `OffscreenCanvas` in place of `document`.
+ */
+class OffscreenCanvasFactory {
+    create(width: number, height: number) {
+        if (width <= 0 || height <= 0) throw new Error("Invalid canvas size");
+        const canvas = new OffscreenCanvas(width, height);
+        return { canvas, context: canvas.getContext("2d") };
+    }
+    reset(canvasAndContext: { canvas?: OffscreenCanvas | null }, width: number, height: number) {
+        if (!canvasAndContext.canvas) throw new Error("Canvas is not specified");
+        if (width <= 0 || height <= 0) throw new Error("Invalid canvas size");
+        canvasAndContext.canvas.width = width;
+        canvasAndContext.canvas.height = height;
+    }
+    destroy(canvasAndContext: { canvas?: OffscreenCanvas | null; context?: unknown }) {
+        if (!canvasAndContext.canvas) throw new Error("Canvas is not specified");
+        canvasAndContext.canvas.width = canvasAndContext.canvas.height = 0;
+        canvasAndContext.canvas = null;
+        canvasAndContext.context = null;
+    }
+}
+
+/**
+ * `getDocument()`'s default `FilterFactory` is `DOMFilterFactory`, which
+ * renders SVG `<filter>` elements into `document.body` to implement soft-mask
+ * compositing (`/SMask` groups -- gradients, drop shadows, translucent photo
+ * edges) via `ctx.filter = "url(#id)"`. That technique is inherently
+ * DOM-bound: there is no document in a Worker to host the `<svg>`, and no
+ * document-less equivalent of a CSS `url(#id)` filter reference. pdfjs's own
+ * Node.js target has the same gap -- `document` doesn't exist there either --
+ * and its answer is `NodeFilterFactory`, an *empty* subclass of
+ * `BaseFilterFactory` that inherits every method as a no-op returning
+ * `"none"`. That class isn't exported from the package, so this reproduces
+ * its exact (lack of) behaviour: soft masks are skipped rather than crashing.
+ * The tradeoff -- content that used a soft mask rasterises without one -- is
+ * pdfjs's own sanctioned answer for "no DOM available", not a workaround
+ * invented here.
+ */
+class NoopFilterFactory {
+    addFilter(): string { return "none"; }
+    addHCMFilter(): string { return "none"; }
+    addAlphaFilter(): string { return "none"; }
+    addLuminosityFilter(): string { return "none"; }
+    addKnockoutFilter(): string { return "none"; }
+    addHighlightHCMFilter(): string { return "none"; }
+    addSelectionHCMFilter(): string { return "none"; }
+    addSelectionFilter(): string { return "none"; }
+    createSelectionStyle(): null { return null; }
+    destroy(): void {}
+}
 
 export async function flattenPdf(bytes: Uint8Array, options: EncodeOptions): Promise<Uint8Array> {
     const [pdfjs, pdfLib] = await Promise.all([
@@ -29,7 +100,15 @@ export async function flattenPdf(bytes: Uint8Array, options: EncodeOptions): Pro
     ]);
     pdfjs.GlobalWorkerOptions.workerSrc = resolveAssetUrl("/pdfjs/pdf.worker.min.mjs");
 
-    const doc = await pdfjs.getDocument({ data: bytes }).promise;
+    const doc = await pdfjs.getDocument({
+        data: bytes,
+        disableFontFace: true,
+        standardFontDataUrl: resolveAssetUrl("/pdfjs/standard_fonts/"),
+        cMapUrl: resolveAssetUrl("/pdfjs/cmaps/"),
+        cMapPacked: true,
+        CanvasFactory: OffscreenCanvasFactory,
+        FilterFactory: NoopFilterFactory,
+    } as unknown as Parameters<typeof pdfjs.getDocument>[0]).promise;
     const outDoc = await pdfLib.PDFDocument.create();
 
     for (let i = 1; i <= doc.numPages; i++) {
@@ -41,7 +120,14 @@ export async function flattenPdf(bytes: Uint8Array, options: EncodeOptions): Pro
 
         // pdfjs-dist's types predate OffscreenCanvas support in this API;
         // the object shape it actually reads from at runtime is identical.
-        const renderParams = { canvasContext: ctx, canvas, viewport } as unknown as Parameters<typeof page.render>[0];
+        // annotationMode: DISABLE matters here beyond just "we don't want
+        // widgets in a flattened page" -- pdfjs's annotation appearance layer
+        // calls document.createElement for interactive form/link widgets,
+        // and document doesn't exist inside a Worker. Without this, any PDF
+        // with links or form fields throws here.
+        const renderParams = {
+            canvasContext: ctx, canvas, viewport, annotationMode: pdfjs.AnnotationMode.DISABLE,
+        } as unknown as Parameters<typeof page.render>[0];
         await page.render(renderParams).promise;
 
         const blob = await canvas.convertToBlob({
