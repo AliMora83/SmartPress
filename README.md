@@ -4,8 +4,8 @@
 
 ## 📊 Overview
 
-**SmartPress** is a self-contained compression utility with a Smart-Bot branded two-column
-UI. Files are compressed **fully client-side** — nothing is uploaded, there is no backend,
+**SmartPress** is a self-contained compression utility with a dark, three-region UI
+(file list, settings panel, status bar) specified in `docs/design-system/`. Files are compressed **fully client-side** — nothing is uploaded, there is no backend,
 no accounts, and no database. Batch image compression works today; PDF support lands in
 Phase 3.
 
@@ -21,7 +21,7 @@ Phase 3.
 ## ✨ Features
 
 - 🔒 **Fully local** — files never leave the device; no upload, no tracking
-- 🎨 **Beautiful UI** — two-column layout with Smart-Bot mascot branding
+- 🎨 **Dark UI** — Geist type, one Min / Medium / Max preset, design tokens in `docs/design-system/`
 - 📦 **Batch operations** — Compress All and Download All
 - 🎯 **Formats** — JPG and PNG today; PDF in Phase 3
 - 🤖 **Smart branding** — Montserrat typography, responsive design
@@ -69,7 +69,8 @@ SmartPress/
 ├── DEPLOY.md                # Deployment guide
 ├── app/                     # Next.js app directory
 ├── components/              # React components
-└── public/                  # Smart-Bot mascot + static assets
+├── docs/design-system/      # Design tokens, component specs, wordmark
+└── public/                  # Static assets, vendored wasm
 ```
 
 ---

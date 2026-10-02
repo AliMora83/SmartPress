@@ -1,15 +1,19 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, DragEvent } from "react";
-import {
-    Upload, Download, CheckCircle, MinusCircle, X, Image as ImageIcon,
-    Settings2, RefreshCw, Clock, Cpu, AlertCircle, Info, FileText,
-} from "lucide-react";
+import { useState, useRef, useEffect, useCallback, useSyncExternalStore, DragEvent } from "react";
+import Link from "next/link";
 import { get, set, del } from "idb-keyval";
+import clsx from "clsx";
+import { Button } from "@/components/ui/Button";
+import { FILE_ROW_GRID, FileRow, type FileRowStatus } from "@/components/ui/FileRow";
+import { PresetSelector } from "@/components/ui/PresetSelector";
+import { Wordmark } from "@/components/ui/Wordmark";
+import { filesFromDrop } from "@/lib/dropEntries";
+import { formatSaved, formatSize } from "@/lib/format";
 import { isWorthKeeping } from "@/lib/compression";
 import { getPool, isCancelled, type Stage } from "@/lib/codecs/pool";
 import {
-    CAPABILITIES, DEFAULT_PNG_MODE, DEFAULT_PRESET, PNG_PRESETS, PRESET_SCALE, formatFromMime,
+    CAPABILITIES, DEFAULT_PNG_MODE, DEFAULT_PRESET, PRESET_SCALE, formatFromMime,
 } from "@/lib/codecs";
 import type { Format, PngMode, Preset } from "@/lib/codecs";
 import { appError, classify, MAX_INPUT_BYTES, type AppError } from "@/lib/errors";
@@ -104,8 +108,6 @@ interface FileItem {
     progress: number;
     stage?: Stage;
     startedAt?: number;
-    /** Object URL for the thumbnail. Revoked with the row. */
-    preview?: string;
     /** The encode result, or the original file if it wasn't worth keeping. Handed to lib/save/ verbatim -- this row never creates a Blob URL for it. */
     resultBlob?: Blob;
     error?: AppError;
@@ -127,14 +129,6 @@ interface FileItem {
 
 const PRESET_LABEL: Record<Preset, string> = { min: "Min", medium: "Medium", max: "Max" };
 
-const STATUS_CONFIG: Record<FileStatus, { label: string; color: string; icon: typeof Clock }> = {
-    pending: { label: "Ready", color: "#6b7280", icon: Clock },
-    queued: { label: "Waiting in queue...", color: "#8b5cf6", icon: Clock },
-    processing: { label: "Compressing", color: "#3b82f6", icon: Cpu },
-    done: { label: "Done", color: "#10b981", icon: CheckCircle },
-    error: { label: "Failed", color: "#ef4444", icon: AlertCircle },
-};
-
 const STAGE_LABEL: Record<Stage, string> = {
     decoding: "Reading image",
     encoding: "Compressing",
@@ -146,21 +140,12 @@ const outputName = (f: FileItem) => {
     return f.alreadyOptimal ? f.file.name : `smartpress_${f.file.name}`;
 };
 
-const formatBytes = (bytes: number) => {
-    if (bytes === 0) return "0 Bytes";
-    const k = 1024;
-    const sizes = ["Bytes", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-};
-
 // --- Main Component ---
 
-export default function Compressor() {
+export default function Compressor({ version }: { version: string }) {
     const [loaded, setLoaded] = useState(false);
     const [files, setFiles] = useState<FileItem[]>([]);
     const [dragActive, setDragActive] = useState(false);
-    const [showSettings, setShowSettings] = useState(false);
     const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
     /** Outcome of the last Download All, for the notice. lib/save/ produced it. */
     const [lastBatch, setLastBatch] = useState<SaveAllResult | null>(null);
@@ -174,23 +159,10 @@ export default function Compressor() {
 
     const pool = getPool();
 
-    // --- Object URL lifetime ---
-    // The thumbnail preview is the only Blob URL a row owns. The result never
-    // gets one here -- it stays a Blob and lib/save/ decides how (or whether)
-    // to turn it into a URL, which is what keeps that decision out of this
-    // component. Created once and revoked exactly once, on row removal, queue
-    // clear, or unmount; never persisted, since a URL from a previous page
-    // session is already dead (Patch 1.1a).
-    const revokedRef = useRef<Set<string>>(new Set());
-    const revoke = useCallback((url?: string) => {
-        if (!url || !url.startsWith("blob:")) return;
-        if (revokedRef.current.has(url)) return;
-        revokedRef.current.add(url);
-        URL.revokeObjectURL(url);
-    }, []);
-    const releaseRow = useCallback((f: FileItem) => {
-        revoke(f.preview);
-    }, [revoke]);
+    // The result never gets a Blob URL here: it stays a Blob and lib/save/
+    // decides how (or whether) to turn it into a URL, which is what keeps that
+    // decision out of this component. Rows no longer carry a thumbnail, so
+    // there is no object URL to create or revoke at all.
 
     // Mirror files into a ref so cleanup and batch handlers read current state
     // without re-subscribing on every change.
@@ -203,10 +175,9 @@ export default function Compressor() {
     useEffect(() => { settingsRef.current = settings; }, [settings]);
 
     useEffect(() => () => {
-        // Unmount: stop every in-flight encode and release every URL.
+        // Unmount: stop every in-flight encode.
         pool.cancelAll();
-        filesRef.current.forEach(f => releaseRow(f));
-    }, [pool, releaseRow]);
+    }, [pool]);
 
     // Restore settings. Nothing here gates the dropzone -- it renders immediately.
     useEffect(() => {
@@ -254,7 +225,7 @@ export default function Compressor() {
 
     // --- Queue management ---
 
-    const handleFileSelect = useCallback((uploaded: FileList | null) => {
+    const handleFileSelect = useCallback((uploaded: ArrayLike<File> | null) => {
         if (!uploaded?.length) return;
         const added: FileItem[] = Array.from(uploaded).map(file => {
             const format = formatFromMime(file.type);
@@ -262,7 +233,7 @@ export default function Compressor() {
             const tooBig = file.size > MAX_INPUT_BYTES;
             const error = !supported
                 ? appError("UNSUPPORTED_FORMAT")
-                : tooBig ? appError("FILE_TOO_LARGE", formatBytes(file.size)) : undefined;
+                : tooBig ? appError("FILE_TOO_LARGE", formatSize(file.size)) : undefined;
             return {
                 // crypto.randomUUID, not Date.now()-index: two drops inside the
                 // same millisecond used to collide and share a row.
@@ -271,11 +242,6 @@ export default function Compressor() {
                 format: supported ? format : undefined,
                 status: error ? "error" : "pending",
                 progress: 0,
-                // Object URL, not a base64 data URL: a data URL for a 6 MB photo
-                // is an 8 MB string held in state for as long as the row lives.
-                // PDF has no preview -- an <img> can't render one, and there's
-                // no cheap raster to hand it; the row falls back to an icon.
-                preview: supported && !tooBig && format !== "pdf" ? URL.createObjectURL(file) : undefined,
                 error,
                 originalSize: file.size,
             };
@@ -290,30 +256,32 @@ export default function Compressor() {
         else if (e.type === "dragleave") setDragActive(false);
     };
 
-    const handleDrop = (e: DragEvent) => {
+    const handleDrop = async (e: DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
         setDragActive(false);
         // Drop events bypass the input's accept filter, so validate here too.
-        handleFileSelect(e.dataTransfer.files);
+        // Folders are walked for their images and PDFs; see lib/dropEntries.ts.
+        const accepts = (f: File) => {
+            const fmt = formatFromMime(f.type);
+            return !!fmt && ACCEPTED_FORMATS.includes(fmt);
+        };
+        handleFileSelect(await filesFromDrop(e.dataTransfer, accepts));
     };
 
     const removeFile = useCallback((id: string) => {
         // Cancel first: a wasm encode has no yield point, so the pool terminates
         // the worker running this row rather than letting it finish invisibly.
         pool.cancel(id);
-        const row = filesRef.current.find(f => f.id === id);
-        if (row) releaseRow(row);
         setFiles(prev => prev.filter(f => f.id !== id));
         setLastBatch(null);
-    }, [pool, releaseRow]);
+    }, [pool]);
 
     const clearAll = useCallback(() => {
         pool.cancelAll();
-        filesRef.current.forEach(f => releaseRow(f));
         setFiles([]);
         setLastBatch(null);
-    }, [pool, releaseRow]);
+    }, [pool]);
 
     // --- Compression ---
 
@@ -453,11 +421,11 @@ export default function Compressor() {
      * and this only records what lib/save/ tells it -- it never claims a file
      * arrived that it doesn't have a "written" or "sent" outcome for.
      */
-    const downloadAll = useCallback(async () => {
+    const downloadAll = useCallback(async (directory?: FileSystemDirectoryHandle) => {
         const ready = filesRef.current.filter(f => f.status === "done" && f.resultBlob);
         if (!ready.length) return;
         setLastBatch(null);
-        const result = await webSaver.saveAll(ready.map(toSaveItem));
+        const result = await webSaver.saveAll(ready.map(toSaveItem), { directory });
         const outcomeByName = new Map(result.results.map(r => [r.filename, r.outcome]));
         setFiles(prev => prev.map(f => {
             if (f.status !== "done" || !f.resultBlob) return f;
@@ -471,486 +439,355 @@ export default function Compressor() {
         setLastBatch(result);
     }, [toSaveItem]);
 
-    // --- Row rendering ---
+    // --- Destination folder ---
+    // Held in memory only: a directory handle is not a setting (IndexedDB stores
+    // settings and nothing else), and a picker needs a user gesture anyway.
+    const [folder, setFolder] = useState<FileSystemDirectoryHandle | null>(null);
+    // `showDirectoryPicker` is Chromium-only. Read through useSyncExternalStore
+    // so the server render and the first client render agree (both `false`).
+    const canPickFolder = useSyncExternalStore(
+        () => () => {},
+        () => typeof window.showDirectoryPicker === "function",
+        () => false,
+    );
 
-    const renderStatusIndicator = (fileItem: FileItem) => {
-        const config = STATUS_CONFIG[fileItem.status];
-
-        switch (fileItem.status) {
-            case "queued":
-                return (
-                    <div className="flex items-center gap-2 mt-2">
-                        <div className="relative flex h-3 w-3">
-                            <span
-                                className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
-                                style={{ backgroundColor: config.color }}
-                            />
-                            <span
-                                className="relative inline-flex rounded-full h-3 w-3"
-                                style={{ backgroundColor: config.color }}
-                            />
-                        </div>
-                        <span className="text-sm font-medium" style={{ color: config.color }}>
-                            {config.label}
-                        </span>
-                    </div>
-                );
-
-            case "processing": {
-                // These encoders expose no progress callback, so the number is
-                // stage-based and would sit at 25% for seconds. An indeterminate
-                // bar plus a running clock reads as working; a frozen percentage
-                // reads as hung.
-                const elapsed = fileItem.startedAt && nowMs
-                    ? Math.max(0, Math.round((nowMs - fileItem.startedAt) / 1000))
-                    : 0;
-                const stage = fileItem.stage ?? "decoding";
-                return (
-                    <div className="mb-2">
-                        <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-                            <div
-                                className="h-full smartpress-indeterminate"
-                                style={{ background: "linear-gradient(90deg, #3b82f6, #6366f1)" }}
-                            />
-                        </div>
-                        <div className="flex items-center justify-between mt-1">
-                            <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: config.color }}>
-                                {STAGE_LABEL[stage]}{elapsed > 0 ? ` · ${elapsed}s` : ""}
-                            </p>
-                            <Cpu size={12} className="animate-pulse" style={{ color: config.color }} />
-                        </div>
-                    </div>
-                );
-            }
-
-            case "done": {
-                const pageBadge = fileItem.format === "pdf" && fileItem.pageCount ? (
-                    <span className="text-xs text-gray-400">
-                        {fileItem.pageCount} {fileItem.pageCount === 1 ? "page" : "pages"}
-                    </span>
-                ) : null;
-
-                if (fileItem.alreadyOptimal) {
-                    // Quiet, secondary state: nothing changed, so this must not
-                    // read as a successful compression. A signed PDF gets its
-                    // own reason -- it was never attempted, not just unhelpful.
-                    return (
-                        <div className="flex items-center gap-2 mt-2 text-gray-500">
-                            <MinusCircle size={14} className="text-gray-400" />
-                            <span className="text-sm">
-                                {fileItem.pdfNote === "signed"
-                                    ? "Signed PDF left unchanged, compressing would break the signature."
-                                    : fileItem.pngSkip
-                                        ? `Skipped — couldn’t reach the minimum quality for this preset (${fileItem.pngSkip.achieved} < ${fileItem.pngSkip.min}). Original kept.`
-                                        : "No size reduction — original kept"}
-                            </span>
-                            {pageBadge}
-                        </div>
-                    );
-                }
-                return (
-                    fileItem.originalSize && fileItem.newSize ? (
-                        <div className="flex flex-col gap-1 mt-2">
-                            <div className="flex items-center gap-2 text-gray-500">
-                                <CheckCircle size={14} className="text-green-500" />
-                                <span className="text-sm">Compressed</span>
-                                <span className="text-sm">→</span>
-                                <span className="text-sm font-bold text-green-700">{formatBytes(fileItem.newSize)}</span>
-                                <span className="text-xs font-bold bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
-                                    -{Math.round((1 - fileItem.newSize / fileItem.originalSize) * 100)}%
-                                </span>
-                                {pageBadge}
-                            </div>
-                            {fileItem.pdfNote === "flatten-not-smaller" && (
-                                <p className="text-xs text-gray-400 pl-[22px]">
-                                    Flattening wouldn&rsquo;t save more — text kept selectable.
-                                </p>
-                            )}
-                            {fileItem.pdfNote === "flatten-failed" && (
-                                <p className="text-xs text-amber-600 pl-[22px]">
-                                    Flattening failed — text kept selectable.
-                                </p>
-                            )}
-                        </div>
-                    ) : null
-                );
-            }
-
-            case "error":
-                return (
-                    <div className="flex flex-col gap-2 mt-2">
-                        <div className="bg-red-50 text-red-700 text-xs px-3 py-1.5 rounded-md font-medium flex items-center gap-2">
-                            <AlertCircle size={14} className="flex-shrink-0" />
-                            <span>{fileItem.error?.message ?? "Compression failed."}</span>
-                        </div>
-                        {fileItem.error?.remediation && (
-                            <div className="bg-blue-50 text-blue-800 text-xs px-3 py-2 rounded-md font-medium border border-blue-100 flex items-start gap-2">
-                                <Info size={14} className="mt-0.5 text-blue-600 flex-shrink-0" />
-                                <span>{fileItem.error.remediation}</span>
-                            </div>
-                        )}
-                    </div>
-                );
-
-            default:
-                return null;
+    const pickFolder = useCallback(async () => {
+        try {
+            setFolder(await window.showDirectoryPicker!({ mode: "readwrite" }));
+        } catch {
+            // Cancelled, or permission refused: keep whatever was chosen before.
         }
-    };
+    }, []);
+
+    // When a batch started by Start finishes and a folder is chosen, write the
+    // results straight into it. The batch flag is set by Start only, so adding
+    // a file or converting a row never triggers a surprise write.
+    const batchRef = useRef(false);
+    useEffect(() => {
+        if (busy || !batchRef.current) return;
+        batchRef.current = false;
+        // Deferred a tick: downloadAll() resets the previous save notice first,
+        // and setState must not run synchronously in an effect body.
+        if (folder) queueMicrotask(() => { void downloadAll(folder); });
+    }, [busy, folder, downloadAll]);
+
+    const start = useCallback(() => {
+        batchRef.current = true;
+        compressAll();
+    }, [compressAll]);
+
+    // --- Derived view state ---
 
     const anyPending = files.some(f => f.status === "pending");
-    const anyDone = files.some(f => f.status === "done" && f.resultBlob);
-    const anyPdf = files.some(f => f.format === "pdf");
+    const doneRows = files.filter(f => f.status === "done" && f.resultBlob);
+    const anyDone = doneRows.length > 0;
+    const inFlight = files.filter(f => f.status === "queued" || f.status === "processing").length;
+    const totalOriginal = doneRows.reduce((n, f) => n + (f.originalSize ?? f.file.size), 0);
+    const totalResult = doneRows.reduce((n, f) => n + (f.newSize ?? 0), 0);
 
+    const rowProps = (f: FileItem) => {
+        const ext = f.convertedTo === "webp"
+            ? "webp"
+            : f.format ? CAPABILITIES[f.format].extension : (f.file.name.split(".").pop() ?? "").slice(0, 4);
+        const badge = ext.toUpperCase();
+
+        let status: FileRowStatus = f.status;
+        const notes: string[] = [];
+        if (f.status === "error") {
+            notes.push(f.error?.message ?? "Compression failed.");
+        } else if (f.status === "done") {
+            if (f.alreadyOptimal) {
+                if (f.pngSkip) {
+                    status = "skipped";
+                    notes.push(
+                        `Skipped — couldn’t reach this preset’s minimum quality (${f.pngSkip.achieved} < ${f.pngSkip.min}). Original kept.`,
+                    );
+                } else {
+                    status = "unchanged";
+                    notes.push(f.pdfNote === "signed"
+                        ? "Signed PDF left unchanged — compressing would break the signature."
+                        : "No size reduction. Original kept.");
+                }
+            }
+            if (f.format === "pdf" && f.pageCount) {
+                notes.push(`${f.pageCount} ${f.pageCount === 1 ? "page" : "pages"}`);
+            }
+            if (f.pdfNote === "flatten-not-smaller") notes.push("Flattening wouldn’t save more — text kept selectable.");
+            if (f.pdfNote === "flatten-failed") notes.push("Flattening failed — text kept selectable.");
+            if (f.convertedTo === "webp") notes.push("Converted to WebP.");
+        }
+
+        const elapsed = f.startedAt && nowMs
+            ? Math.max(0, Math.round((nowMs - f.startedAt) / 1000))
+            : 0;
+
+        return {
+            name: f.file.name,
+            badge,
+            status,
+            originalSize: f.originalSize ?? f.file.size,
+            resultSize: f.newSize,
+            elapsedSeconds: elapsed,
+            stageLabel: STAGE_LABEL[f.stage ?? "decoding"],
+            note: notes.join(" · ") || undefined,
+            errorRemediation: f.error?.remediation,
+            canRetry: f.error?.retryable === true,
+            canSave: f.status === "done" && !!f.resultBlob,
+            nudgePct: f.status === "done" && f.webpOffer
+                ? Math.round(f.webpOffer.savedRatio * 100) : undefined,
+            onSave: () => { void saveRow(f.id); },
+            onRemove: () => removeFile(f.id),
+            onRetry: () => { void compressFile(f.id); },
+            onConvert: () => convertToWebp(f.id),
+        };
+    };
+
+    const presetHint: Record<Preset, string> = {
+        min: "Lightest touch. Keeps the most quality.",
+        medium: "Balanced size and quality. The default.",
+        max: "Smallest files. Fine detail may soften.",
+    };
+
+    const saveNotice = (() => {
+        if (!lastBatch) return null;
+        const failed = lastBatch.results.filter(r => r.outcome === "failed").length;
+        const ok = lastBatch.results.length - failed;
+        if (lastBatch.mode === "cancelled") return "Save cancelled";
+        const where = lastBatch.mode === "directory" ? `to ${folder?.name ?? "folder"}` : "to downloads";
+        return `${ok} ${ok === 1 ? "file" : "files"} saved ${where}${failed ? ` · ${failed} failed` : ""}`;
+    })();
+
+    // Below lg the page simply flows and scrolls. From lg up it is the ~1120x740
+    // window the design describes, with the list and panel scrolling inside.
     return (
-        <div className={`w-full h-full ${files.length === 0 ? 'min-h-[50vh] md:min-h-screen flex items-center justify-center' : 'py-6 md:p-12'}`}>
-            <div className="w-full max-w-4xl mx-auto space-y-6">
+        <div className="flex min-h-screen items-center justify-center bg-ground lg:p-6">
+            <div className="flex min-h-screen w-full max-w-[1120px] flex-col bg-ground lg:h-[min(740px,calc(100vh-48px))] lg:min-h-0 lg:overflow-hidden lg:rounded-xl lg:border lg:border-line">
 
-                {/* Upload Area */}
-                <div className="space-y-4">
-                    <div
-                        className={`border-2 border-dashed rounded-xl p-12 flex flex-col items-center justify-center cursor-pointer transition-all ${dragActive ? "border-blue-500 bg-blue-50 scale-105" : "border-gray-300 hover:bg-blue-50 hover:border-blue-400"}`}
-                        onClick={() => document.getElementById('file-upload')?.click()}
-                        onDragEnter={handleDrag}
-                        onDragLeave={handleDrag}
-                        onDragOver={handleDrag}
-                        onDrop={handleDrop}
-                    >
-                        <Upload className={`mb-4 transition-transform ${dragActive ? "scale-125" : ""}`} size={48} color={dragActive ? "#3b82f6" : "#6b7280"} />
-                        <p className="text-lg font-medium text-gray-700 text-center">
-                            {dragActive ? "Drop files here" : "Click or drag files to add them"}
-                        </p>
-                        <p className="text-sm text-gray-400 mt-2 text-center">
-                            Images and PDFs ({ACCEPTED_LABEL}) • Multiple files supported
-                        </p>
+                {/* Header */}
+                <header className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-line px-6 py-3">
+                    <Wordmark version={version} />
+                    <div className="flex items-center gap-2">
+                        <Button variant="quiet" onClick={clearAll} disabled={files.length === 0}>Clear list</Button>
+                        <Button variant="secondary" onClick={() => document.getElementById("file-upload")?.click()}>
+                            Add files
+                        </Button>
                         <input
                             id="file-upload"
                             type="file"
                             className="hidden"
                             accept={ACCEPT_ATTR}
                             multiple
-                            onChange={(e) => handleFileSelect(e.target.files)}
+                            onChange={(e) => {
+                                handleFileSelect(e.target.files);
+                                e.target.value = "";
+                            }}
                         />
                     </div>
+                </header>
 
-                    {/* Settings Toggle */}
-                    <div className="flex justify-end">
-                        <button
-                            onClick={() => setShowSettings(!showSettings)}
-                            className="flex items-center gap-2 text-sm text-gray-500 hover:text-blue-600 transition font-medium"
+                <div className="flex flex-1 flex-col lg:min-h-0 lg:flex-row">
+
+                    {/* Main column */}
+                    <main className="flex min-h-[320px] min-w-0 flex-1 flex-col gap-4 p-6 lg:min-h-0">
+                        <div
+                            role="button"
+                            tabIndex={0}
+                            aria-label="Add files"
+                            className={clsx(
+                                "flex flex-shrink-0 cursor-pointer items-center justify-between gap-4 rounded-xl border border-dashed px-5 py-4 transition-colors",
+                                dragActive ? "border-control-border bg-raised" : "border-line-strong hover:bg-surface",
+                            )}
+                            onClick={() => document.getElementById("file-upload")?.click()}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    document.getElementById("file-upload")?.click();
+                                }
+                            }}
+                            onDragEnter={handleDrag}
+                            onDragLeave={handleDrag}
+                            onDragOver={handleDrag}
+                            onDrop={handleDrop}
                         >
-                            <Settings2 size={16} /> {showSettings ? "Hide Settings" : "Compression Settings"}
-                        </button>
-                    </div>
+                            <p className="text-body">{dragActive ? "Drop to add" : "Drop files or a folder"}</p>
+                            <p className="label-mono text-text-muted">{ACCEPTED_LABEL}</p>
+                        </div>
 
-                    {/* Settings Panel */}
-                    {showSettings && (
-                        <div className="bg-gray-50 rounded-xl p-6 border border-gray-100 space-y-6">
-                            <fieldset className="space-y-2">
-                                <legend className="text-sm font-bold text-gray-700">Compression</legend>
-                                <div className="grid grid-cols-3 gap-2">
-                                    {(Object.keys(PRESET_SCALE) as Preset[]).map(p => (
-                                        <label
-                                            key={p}
-                                            className={`cursor-pointer rounded-lg border px-3 py-2 text-center text-sm font-medium transition ${
-                                                settings.preset === p
-                                                    ? "border-blue-600 bg-blue-50 text-blue-700"
-                                                    : "border-gray-200 bg-white text-gray-700 hover:border-blue-300"}`}
-                                        >
-                                            <input
-                                                type="radio" name="preset" value={p}
-                                                checked={settings.preset === p}
-                                                onChange={() => setSettings(s => ({ ...s, preset: p }))}
-                                                className="sr-only"
-                                            />
-                                            {PRESET_LABEL[p]}
-                                        </label>
-                                    ))}
-                                </div>
-                                <p className="text-xs text-gray-500">
-                                    Min keeps the most quality, Max compresses hardest. Applies to JPEG,
-                                    images inside PDFs{settings.pngMode === "lossy" ? " and PNG" : ""}.
+                        {files.length === 0 ? (
+                            <div className="flex flex-1 flex-col items-start justify-center gap-2">
+                                <h1 className="text-display">Smaller files. Nothing sent.</h1>
+                                <p className="text-body text-text-muted">
+                                    Everything runs on this device. Drop images or PDFs above to start.
                                 </p>
-                                {settings.pngMode === "lossy" && (
-                                    <p className="text-xs text-gray-500">
-                                        PNG palette quality {PNG_PRESETS[settings.preset].min}–{PNG_PRESETS[settings.preset].max}.
-                                        A PNG that can&rsquo;t reach the lower number is skipped and left as-is.
-                                    </p>
-                                )}
+                            </div>
+                        ) : (
+                            <>
+                                <div className={clsx(FILE_ROW_GRID, "label-mono flex-shrink-0 px-3 text-text-muted")} aria-hidden="true">
+                                    <span>File</span>
+                                    <span className="text-right">Original</span>
+                                    <span className="text-right">Result</span>
+                                    <span className="text-right">Saved</span>
+                                    <span />
+                                </div>
+                                <ul className="-mt-2 flex min-h-0 flex-1 flex-col gap-2 lg:overflow-y-auto">
+                                    {files.map(f => <FileRow key={f.id} {...rowProps(f)} />)}
+                                </ul>
+                            </>
+                        )}
+                    </main>
+
+                    {/* Settings panel */}
+                    <aside className="flex w-full flex-shrink-0 flex-col border-t border-line bg-surface p-5 lg:w-[320px] lg:border-l lg:border-t-0">
+                        <div className="flex min-h-0 flex-1 flex-col gap-6 lg:overflow-y-auto">
+                            <section>
+                                <h2 className="label-mono mb-3 text-text-muted">Compression</h2>
+                                <PresetSelector
+                                    label="Compression"
+                                    options={(Object.keys(PRESET_SCALE) as Preset[]).map(p => ({ value: p, label: PRESET_LABEL[p] }))}
+                                    value={settings.preset}
+                                    onChange={(preset) => setSettings(s => ({ ...s, preset }))}
+                                    hint={presetHint[settings.preset]}
+                                />
+                            </section>
+
+                            <fieldset>
+                                <legend className="label-mono mb-3 text-text-muted">PNG mode</legend>
+                                <div className="flex flex-col gap-3">
+                                    <Choice
+                                        type="radio" name="png-mode" checked={settings.pngMode === "lossy"}
+                                        onChange={() => setSettings(s => ({ ...s, pngMode: "lossy" }))}
+                                        label="Smaller (palette)" hint="Reduces to a 256-colour palette. Where PNG savings are."
+                                    />
+                                    <Choice
+                                        type="radio" name="png-mode" checked={settings.pngMode === "lossless"}
+                                        onChange={() => setSettings(s => ({ ...s, pngMode: "lossless" }))}
+                                        label="Lossless" hint="Every pixel kept. Saves far less."
+                                    />
+                                </div>
                             </fieldset>
 
-                            <div className="space-y-2">
-                                <span className="text-sm font-bold text-gray-700">PNG mode</span>
-                                <div className="flex flex-col gap-2">
-                                    <label className="flex items-start gap-2 cursor-pointer">
-                                        <input
-                                            type="radio" name="png-mode" value="lossy"
-                                            checked={settings.pngMode === "lossy"}
-                                            onChange={() => setSettings(s => ({ ...s, pngMode: "lossy" }))}
-                                            className="mt-1 accent-blue-600"
-                                        />
-                                        <span className="text-sm text-gray-700">
-                                            <span className="font-medium">Smaller (palette)</span>
-                                            <span className="block text-xs text-gray-500">
-                                                Reduces to a 256-colour palette. Where PNG&rsquo;s savings are.
-                                            </span>
-                                        </span>
-                                    </label>
-                                    <label className="flex items-start gap-2 cursor-pointer">
-                                        <input
-                                            type="radio" name="png-mode" value="lossless"
-                                            checked={settings.pngMode === "lossless"}
-                                            onChange={() => setSettings(s => ({ ...s, pngMode: "lossless" }))}
-                                            className="mt-1 accent-blue-600"
-                                        />
-                                        <span className="text-sm text-gray-700">
-                                            <span className="font-medium">Lossless</span>
-                                            <span className="block text-xs text-gray-500">
-                                                Every pixel preserved. Saves far less.
-                                            </span>
-                                        </span>
-                                    </label>
-                                </div>
-                            </div>
+                            <section>
+                                <h2 className="label-mono mb-3 text-text-muted">PDF</h2>
+                                <Choice
+                                    type="checkbox" checked={settings.keepTextSelectable}
+                                    onChange={(e) => setSettings(s => ({ ...s, keepTextSelectable: e.target.checked }))}
+                                    label="Keep PDF text selectable"
+                                    hint="Off flattens each page to an image. Smaller, but text and links are lost."
+                                />
+                            </section>
 
-                            {anyPdf && (
-                                <div className="space-y-2 border-t border-gray-200 pt-4">
-                                    <label className="flex items-start gap-2 cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            checked={settings.keepTextSelectable}
-                                            onChange={(e) => setSettings(s => ({ ...s, keepTextSelectable: e.target.checked }))}
-                                            className="mt-1 accent-blue-600"
-                                        />
-                                        <span className="text-sm text-gray-700">
-                                            <span className="font-medium">Keep text selectable</span>
-                                            <span className="block text-xs text-gray-500">
-                                                On (default): PDF text and links stay usable. Off: pages may
-                                                also be flattened to images for extra savings, if that would
-                                                actually save more — text is no longer selectable or
-                                                searchable afterward.
+                            <fieldset>
+                                <legend className="label-mono mb-3 text-text-muted">Save to</legend>
+                                <div className="flex flex-col gap-3">
+                                    <Choice
+                                        type="radio" name="save-to" checked={false} disabled
+                                        onChange={() => {}}
+                                        label="Same as source" hint="Desktop app only. A browser can't write next to the original."
+                                    />
+                                    <Choice
+                                        type="radio" name="save-to" checked readOnly
+                                        onChange={() => {}}
+                                        label="Choose folder"
+                                        hint={canPickFolder
+                                            ? (folder ? "Finished files are written here." : "Pick a folder and finished files save there. Otherwise use Save all.")
+                                            : "This browser can't write to a folder, so files download instead."}
+                                    />
+                                    <div className="flex gap-2">
+                                        <div
+                                            className="data-mono flex h-8 min-w-0 flex-1 items-center rounded-md border border-control-border bg-ground px-3 text-text-muted"
+                                            title={folder?.name}
+                                        >
+                                            <span className="truncate">
+                                                {canPickFolder ? (folder?.name ?? "No folder chosen") : "Browser downloads"}
                                             </span>
-                                        </span>
-                                    </label>
+                                        </div>
+                                        <Button variant="quiet" onClick={() => { void pickFolder(); }} disabled={!canPickFolder}>
+                                            Browse
+                                        </Button>
+                                    </div>
                                 </div>
-                            )}
-
-                            <p className="text-xs text-gray-500 border-t border-gray-200 pt-4">
-                                Output keeps the format it came in as.
-                            </p>
+                            </fieldset>
                         </div>
-                    )}
+
+                        <Button
+                            variant="primary" size="lg" className="mt-5 w-full"
+                            onClick={start} disabled={!anyPending}
+                        >
+                            Start
+                        </Button>
+                    </aside>
                 </div>
 
-                {/* File Queue */}
-                {files.length > 0 && (
-                    <div className="bg-white rounded-xl shadow-xl border border-gray-100 p-6">
-                        <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-xl font-bold text-gray-800">File Queue ({files.length})</h2>
-                            <div className="flex gap-3">
-                                {anyPending && (
-                                    <button
-                                        onClick={compressAll}
-                                        className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded transition font-medium"
-                                    >
-                                        Compress All
-                                    </button>
-                                )}
-                                {anyDone && (
-                                    <button
-                                        onClick={downloadAll}
-                                        className="text-sm bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded transition font-medium"
-                                    >
-                                        Download All
-                                    </button>
-                                )}
-                                <button
-                                    onClick={clearAll}
-                                    className="text-sm text-red-500 hover:text-red-700 transition font-medium"
-                                >
-                                    Clear All
-                                </button>
-                            </div>
-                        </div>
-
-                        {/*
-                          What this says depends entirely on which Saver ran. The
-                          directory path gets a real per-file result, so a full
-                          success is worded as one; the anchor fallback never gets
-                          more than "handed to the browser", because that is all it
-                          ever knows. Either way every row keeps its own save control.
-                        */}
-                        {lastBatch && (() => {
-                            const { mode, results } = lastBatch;
-                            const failed = results.filter(r => r.outcome === "failed");
-                            const trivial = mode !== "cancelled" && failed.length === 0 && results.length <= 1;
-                            if (trivial) return null;
-
-                            const tone = mode === "cancelled" || failed.length > 0 ? "amber" : "emerald";
-                            const colors = tone === "amber"
-                                ? { bg: "bg-amber-50", border: "border-amber-200", icon: "text-amber-600", text: "text-amber-900", hover: "hover:bg-amber-100", dismiss: "text-amber-700" }
-                                : { bg: "bg-emerald-50", border: "border-emerald-200", icon: "text-emerald-600", text: "text-emerald-900", hover: "hover:bg-emerald-100", dismiss: "text-emerald-700" };
-
-                            return (
-                                <div className={`mb-4 ${colors.bg} border ${colors.border} rounded-lg p-4 flex items-start gap-3`}>
-                                    <Info size={16} className={`${colors.icon} mt-0.5 flex-shrink-0`} />
-                                    <div className={`flex-1 text-sm ${colors.text}`}>
-                                        {mode === "cancelled" ? (
-                                            <>
-                                                <p className="font-bold">Folder selection was cancelled — nothing was saved.</p>
-                                                <p className="mt-1 text-xs leading-relaxed">
-                                                    Nothing was written to disk. Use each file&rsquo;s own Download
-                                                    button below, or try Download All again.
-                                                </p>
-                                            </>
-                                        ) : mode === "directory" ? (
-                                            <>
-                                                <p className="font-bold">
-                                                    Saved {results.length - failed.length} of {results.length} files to your folder.
-                                                </p>
-                                                {failed.length > 0 && (
-                                                    <p className="mt-1 text-xs leading-relaxed">
-                                                        {failed.length} could not be written — use that row&rsquo;s own
-                                                        Download button to retry: {failed.map(f => f.filename).join(", ")}
-                                                    </p>
-                                                )}
-                                            </>
-                                        ) : (
-                                            <>
-                                                <p className="font-bold">
-                                                    Sent {results.length} files to your browser.
-                                                </p>
-                                                <p className="mt-1 text-xs leading-relaxed">
-                                                    Browsers ask permission before saving several files at once, and
-                                                    if that prompt was dismissed the rest were dropped without telling
-                                                    this page. Check your downloads folder for the files below —
-                                                    anything missing can be downloaded again from its own row.
-                                                </p>
-                                                <ul className="mt-2 text-xs font-mono space-y-0.5">
-                                                    {results.map(r => <li key={r.filename}>{r.filename}</li>)}
-                                                </ul>
-                                            </>
-                                        )}
-                                    </div>
-                                    <button
-                                        onClick={() => setLastBatch(null)}
-                                        className={`p-1 ${colors.hover} rounded transition flex-shrink-0`}
-                                        aria-label="Dismiss"
-                                    >
-                                        <X size={14} className={colors.dismiss} />
-                                    </button>
-                                </div>
-                            );
-                        })()}
-
-                        <div className="space-y-3">
-                            {files.map(fileItem => (
-                                <div key={fileItem.id} className="bg-gray-50 rounded-lg p-4 relative border border-transparent hover:border-gray-200 transition-colors">
-                                    <button
-                                        onClick={() => removeFile(fileItem.id)}
-                                        className="absolute top-2 right-2 p-1 hover:bg-gray-200 rounded transition"
-                                        aria-label={`Remove ${fileItem.file.name}`}
-                                    >
-                                        <X size={16} className="text-gray-500" />
-                                    </button>
-
-                                    <div className="flex items-start gap-4">
-                                        <div className="flex-shrink-0 w-20 h-20 bg-gray-200 rounded overflow-hidden">
-                                            {fileItem.preview ? (
-                                                /*
-                                                 * Plain <img>, deliberately. next/image optimises
-                                                 * through a loader that cannot resolve a blob: URL,
-                                                 * and there is nothing to optimise anyway -- the
-                                                 * bytes are already in memory on this device and
-                                                 * never cross the network.
-                                                 */
-                                                // eslint-disable-next-line @next/next/no-img-element
-                                                <img src={fileItem.preview} alt="" className="w-full h-full object-cover" />
-                                            ) : (
-                                                <div className="w-full h-full flex items-center justify-center">
-                                                    {fileItem.format === "pdf"
-                                                        ? <FileText className="text-gray-400" size={32} />
-                                                        : <ImageIcon className="text-gray-400" size={32} />}
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <p className="font-bold text-gray-800 truncate">{fileItem.file.name}</p>
-                                                <span className="text-xs text-gray-500 flex-shrink-0">
-                                                    {formatBytes(fileItem.file.size)}
-                                                </span>
-                                            </div>
-
-                                            {renderStatusIndicator(fileItem)}
-
-                                            <div className="flex gap-2 mt-2 items-center">
-                                                {fileItem.status === "pending" && (
-                                                    <button
-                                                        onClick={() => compressFile(fileItem.id)}
-                                                        className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded transition font-bold uppercase tracking-wider"
-                                                    >
-                                                        Compress
-                                                    </button>
-                                                )}
-                                                {fileItem.status === "error" && fileItem.error?.retryable && (
-                                                    <button
-                                                        onClick={() => compressFile(fileItem.id)}
-                                                        className="text-xs bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded transition font-bold uppercase tracking-wider inline-flex items-center gap-1"
-                                                    >
-                                                        <RefreshCw size={12} /> Retry
-                                                    </button>
-                                                )}
-                                                {fileItem.status === "done" && fileItem.resultBlob && (
-                                                    fileItem.alreadyOptimal ? (
-                                                        <button
-                                                            onClick={() => saveRow(fileItem.id)}
-                                                            className="text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2 transition inline-flex items-center gap-1 font-medium"
-                                                        >
-                                                            <Download size={12} /> Download original
-                                                        </button>
-                                                    ) : (
-                                                        <button
-                                                            onClick={() => saveRow(fileItem.id)}
-                                                            className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded transition inline-flex items-center gap-1 font-bold uppercase tracking-wider"
-                                                        >
-                                                            <Download size={14} /> Download
-                                                        </button>
-                                                    )
-                                                )}
-                                                {fileItem.saved && fileItem.status === "done" && (
-                                                    <span className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">
-                                                        {fileItem.saved === "written" ? "Saved to folder" : "Sent to downloads"}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {fileItem.status === "done" && fileItem.webpOffer && (
-                                        <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2">
-                                            <p className="text-xs text-blue-800">
-                                                WebP would save an additional{" "}
-                                                <span className="font-bold">{Math.round(fileItem.webpOffer.savedRatio * 100)}%</span>
-                                                {" "}— Convert?
-                                            </p>
-                                            <button
-                                                onClick={() => convertToWebp(fileItem.id)}
-                                                className="flex-shrink-0 text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded transition font-bold uppercase tracking-wider"
-                                            >
-                                                Convert
-                                            </button>
-                                        </div>
-                                    )}
-                                    {fileItem.status === "done" && fileItem.convertedTo === "webp" && (
-                                        <p className="mt-3 text-xs text-gray-500">Converted to WebP.</p>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
+                {/* Status bar. "Show in folder" is not here on purpose: a web page
+                    cannot open the OS file manager, so it arrives with the desktop
+                    build (Sprint 3.3) rather than existing as a button that does
+                    nothing. Until then "Save all" is the way out when no folder
+                    was chosen. */}
+                <footer className="flex flex-shrink-0 items-center justify-between gap-4 border-t border-line px-6 py-2">
+                    <p className="data-mono min-w-0 truncate text-text-muted">
+                        {inFlight > 0
+                            ? `Compressing ${inFlight} of ${files.length}`
+                            : anyDone
+                                ? <>
+                                    {doneRows.length} done {"·"} {formatSize(totalOriginal)} {"→"} {formatSize(totalResult)}
+                                    {totalResult < totalOriginal && <> <span className="text-accent">{formatSaved(totalOriginal, totalResult)}</span></>}
+                                    {saveNotice && <> {"·"} {saveNotice}</>}
+                                </>
+                                : files.length ? `${files.length} ${files.length === 1 ? "file" : "files"} ready` : "No files"}
+                    </p>
+                    <div className="flex flex-shrink-0 items-center gap-4">
+                        {anyDone && inFlight === 0 && !folder && (
+                            <Button variant="quiet" size="sm" onClick={() => { void downloadAll(); }}>Save all</Button>
+                        )}
+                        {/* SmartPress is GPLv3 and ships vendored GPL binaries to the
+                            browser, so the notices and the source have to be reachable
+                            from the running app -- not only from the repository. */}
+                        <nav aria-label="Licence" className="label-mono flex gap-3 text-text-muted">
+                            <Link href="/licenses" className="hover:text-text">GPLv3</Link>
+                            <a href="https://github.com/AliMora83/SmartPress" rel="noopener noreferrer" target="_blank" className="hover:text-text">Source</a>
+                            <Link href="/licenses" className="hover:text-text">Notices</Link>
+                        </nav>
                     </div>
-                )}
+                </footer>
             </div>
         </div>
+    );
+}
+
+/**
+ * Radio or checkbox row. The native input is visually hidden and a styled box
+ * stands in: a control-border outline (never `line`), and no accent -- accent
+ * is reserved for Start, the selected preset, savings, progress and focus.
+ */
+function Choice({
+    type, label, hint, className, ...input
+}: {
+    type: "radio" | "checkbox";
+    label: string;
+    hint: string;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, "type">) {
+    return (
+        <label className={clsx(
+            "flex items-start gap-3",
+            input.disabled ? "cursor-not-allowed opacity-40" : "cursor-pointer",
+            className,
+        )}>
+            <input type={type} className="peer sr-only" {...input} />
+            <span
+                aria-hidden="true"
+                className={clsx(
+                    "mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center border border-control-border bg-ground",
+                    "peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-accent",
+                    type === "radio" ? "rounded-full" : "rounded-xs",
+                    "peer-checked:[&>span]:opacity-100",
+                )}
+            >
+                <span className={clsx("bg-text opacity-0 transition-opacity", type === "radio" ? "h-2 w-2 rounded-full" : "h-2 w-2 rounded-[1px]")} />
+            </span>
+            <span className="min-w-0">
+                <span className="block text-body">{label}</span>
+                <span className="block text-small text-text-muted">{hint}</span>
+            </span>
+        </label>
     );
 }

@@ -1,18 +1,24 @@
 import type { Metadata } from "next";
-import { Montserrat } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-const montserrat = Montserrat({
-  variable: "--font-montserrat",
+// Geist for the interface, Geist Mono for every number and section label.
+// next/font self-hosts both at build time: nothing is fetched at runtime.
+const geistSans = Geist({
+  variable: "--font-geist-sans",
   subsets: ["latin"],
-  weight: ["400", "700", "800"], // Regular, Bold, Extra Bold
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
   title: "SmartPress - Fast, Smart Compression",
   // Video left with Sprint 1.1. The description says what the app does now.
   description:
-    "Fast, smart image and PDF compression that runs entirely in your browser. Files never leave your device, no accounts.",
+    "Fast, private image and PDF compression that runs entirely on your machine. Files never leave your device, no accounts.",
   icons: {
     icon: "/favicon.ico",
   },
@@ -25,7 +31,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${montserrat.variable} antialiased`}>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         {children}
       </body>
     </html>

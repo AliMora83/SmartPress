@@ -1,4 +1,4 @@
-import type { SaveAllResult, SaveItem, SaveOneResult, Saver } from "./types";
+import type { SaveAllOptions, SaveAllResult, SaveItem, SaveOneResult, Saver } from "./types";
 
 /**
  * `showDirectoryPicker()` is Chromium-only and not yet in TypeScript's bundled
@@ -44,13 +44,17 @@ function isAbort(e: unknown): boolean {
  * real promises that reject on a real failure (quota, revoked permission,
  * disk full), so -- unlike an anchor click -- success is known per file.
  */
-async function saveAllToDirectory(items: SaveItem[]): Promise<SaveAllResult> {
-    let dir: FileSystemDirectoryHandle;
-    try {
-        dir = await window.showDirectoryPicker!({ mode: "readwrite" });
-    } catch (e) {
-        if (isAbort(e)) return { mode: "cancelled", results: [] };
-        throw e;
+async function saveAllToDirectory(
+    items: SaveItem[], picked?: FileSystemDirectoryHandle,
+): Promise<SaveAllResult> {
+    let dir = picked;
+    if (!dir) {
+        try {
+            dir = await window.showDirectoryPicker!({ mode: "readwrite" });
+        } catch (e) {
+            if (isAbort(e)) return { mode: "cancelled", results: [] };
+            throw e;
+        }
     }
 
     const results: SaveOneResult[] = [];
@@ -98,8 +102,9 @@ export const webSaver: Saver = {
         return { filename: item.filename, outcome: "sent" };
     },
 
-    async saveAll(items: SaveItem[]): Promise<SaveAllResult> {
+    async saveAll(items: SaveItem[], options?: SaveAllOptions): Promise<SaveAllResult> {
         if (!items.length) return { mode: "sequential", results: [] };
+        if (options?.directory) return await saveAllToDirectory(items, options.directory);
         if (hasDirectoryPicker()) {
             try {
                 return await saveAllToDirectory(items);
