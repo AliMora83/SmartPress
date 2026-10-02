@@ -1,5 +1,5 @@
 import { loadWasm } from "./loader";
-import { DEFAULT_PNG_MODE, DEFAULT_PNG_PRESET, PNG_PRESETS, resolveEffort, resolveNative } from "./quality";
+import { DEFAULT_PNG_MODE, DEFAULT_PRESET, PNG_PRESETS, resolveEffort, resolveNative } from "./quality";
 import { measureQuality } from "./pngQuality";
 import type { EncodeOptions, EncodeResult, Format, ImageDataLike } from "./types";
 
@@ -93,23 +93,22 @@ async function makePng(): Promise<Encoder> {
     };
     await init({ module_or_path: module });
     return async (image, options) => {
-        // Two paths behind one codec. Lossy quantizes to a palette and spends
-        // the control on quality; lossless keeps every pixel and spends it on
-        // oxipng effort instead, so the slider never goes dead. `quantize`
-        // is what the vendored binary switches on.
+        // Two paths behind one codec. Lossy quantizes to a palette at the
+        // preset's quality range; lossless keeps every pixel at a fixed oxipng
+        // effort and ignores the preset. `quantize` is what the vendored binary
+        // switches on.
         const lossless = (options.pngMode ?? DEFAULT_PNG_MODE) === "lossless";
         // The options struct is deserialised whole on the Rust side and its
         // fields have no defaults -- a partial object fails inside wasm with an
         // opaque `unwrap_throw` panic. So both paths pass every field and differ
-        // only in `quantize` and what the control feeds.
+        // only in `quantize` and what feeds `quality`/`level`.
         const run = (quality: number) => optimize(image.data, image.width, image.height, {
             quality,
             quantize: !lossless,
             speed: 4,
             dithering: 1,
-            // Lossy fixes oxipng effort at 3 and spends the control on palette
-            // quality; lossless has no quality to trade, so the control buys
-            // effort here instead and the slider never goes dead.
+            // Lossy fixes oxipng effort at 3 and spends the preset on palette
+            // quality; lossless has no quality to trade, so it gets LOSSLESS_EFFORT.
             level: lossless ? resolveEffort(options) : 3,
             interlace: false,
             colors: 256,
@@ -125,7 +124,7 @@ async function makePng(): Promise<Encoder> {
         // The wasm's `quality` is imagequant's max; it has no min, so it never
         // refuses an image. The preset's min is enforced here by measuring the
         // output -- see pngQuality.ts for what that measurement is.
-        const preset = options.pngPreset ?? DEFAULT_PNG_PRESET;
+        const preset = options.pngPreset ?? DEFAULT_PRESET;
         const { min, max } = PNG_PRESETS[preset];
         const bytes = run(max);
         const [rgba] = png_to_rgba(bytes);

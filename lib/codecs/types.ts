@@ -2,11 +2,10 @@
 export type Format = "jpeg" | "png" | "webp" | "avif" | "pdf";
 
 /**
- * What the universal 0-10 control means for a codec.
+ * What a codec's quality axis means.
  *
- * Lossy codecs spend the scale on visual quality. A lossless codec has no
- * quality axis, so the same control buys encoder effort instead -- the slider
- * never goes dead, per the settings decision.
+ * Lossy codecs spend it on visual quality. A lossless codec has no quality
+ * axis and would spend it on encoder effort instead.
  */
 export type ControlKind = "quality" | "effort";
 
@@ -39,11 +38,13 @@ export interface CodecCapability {
 export type PngMode = "lossy" | "lossless";
 
 /**
- * Lossy PNG presets, named for how much compression they apply: `min` is the
- * lightest touch (highest quality), `max` the most aggressive. Each maps to a
- * pngquant `min_quality`-`max_quality` range in quality.ts.
+ * The one user-facing compression control, named for how much compression it
+ * applies: `min` is the lightest touch (highest quality), `max` the most
+ * aggressive. It maps onto the 0-10 scale for JPEG/WebP/PDF images
+ * (`PRESET_SCALE`) and onto a pngquant `min_quality`-`max_quality` range for
+ * lossy PNG (`PNG_PRESETS`), both in quality.ts.
  */
-export type PngPreset = "min" | "medium" | "max";
+export type Preset = "min" | "medium" | "max";
 
 /**
  * What a lossy PNG encode measured about its own output. `skipped` means the
@@ -51,7 +52,7 @@ export type PngPreset = "min" | "medium" | "max";
  * not be used -- the caller keeps the original.
  */
 export interface PngQualityReport {
-    preset: PngPreset;
+    preset: Preset;
     /** imagequant-scale 0-100, see pngQuality.ts. */
     achieved: number;
     min: number;
@@ -70,17 +71,17 @@ export interface EncodeOptions {
     /** 0-10, higher is better. Default 7. Mapped per codec in quality.ts. */
     quality?: number;
     /**
-     * PNG only. Lossy quantizes and spends the control on quality; lossless
-     * keeps every pixel and spends it on encoder effort. Ignored by other
+     * PNG only. Lossy quantizes to a palette at the preset's quality range;
+     * lossless keeps every pixel at a fixed oxipng effort. Ignored by other
      * codecs. Defaults to DEFAULT_PNG_MODE.
      */
     pngMode?: PngMode;
     /**
      * PNG lossy only. Replaces the 0-10 scale for that path: the preset's max
      * is handed to the quantizer and its min is enforced afterwards. Defaults
-     * to DEFAULT_PNG_PRESET.
+     * to DEFAULT_PRESET.
      */
-    pngPreset?: PngPreset;
+    pngPreset?: Preset;
     /**
      * Calibration seam. Bypasses the 0-10 curve and hands the encoder this
      * native value directly. Only /bench sets it -- it exists so a curve can be
