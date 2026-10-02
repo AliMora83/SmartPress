@@ -13,8 +13,10 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     // Vendored third-party code -- not ours to lint or restyle. Provenance
-    // and modifications are recorded in public/wasm/PROVENANCE.md.
+    // and modifications are recorded in public/wasm/PROVENANCE.md and
+    // public/pdfjs/PROVENANCE.md respectively.
     "lib/codecs/vendor/**",
+    "public/pdfjs/**",
   ]),
 ]);
 

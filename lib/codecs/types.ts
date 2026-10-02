@@ -1,5 +1,5 @@
 /** Formats the codec layer can encode to. */
-export type Format = "jpeg" | "png" | "webp" | "avif";
+export type Format = "jpeg" | "png" | "webp" | "avif" | "pdf";
 
 /**
  * What the universal 0-10 control means for a codec.
@@ -38,6 +38,33 @@ export interface CodecCapability {
  */
 export type PngMode = "lossy" | "lossless";
 
+/**
+ * Lossy PNG presets, named for how much compression they apply: `min` is the
+ * lightest touch (highest quality), `max` the most aggressive. Each maps to a
+ * pngquant `min_quality`-`max_quality` range in quality.ts.
+ */
+export type PngPreset = "min" | "medium" | "max";
+
+/**
+ * What a lossy PNG encode measured about its own output. `skipped` means the
+ * quantized result fell below the preset's minimum quality, so the bytes should
+ * not be used -- the caller keeps the original.
+ */
+export interface PngQualityReport {
+    preset: PngPreset;
+    /** imagequant-scale 0-100, see pngQuality.ts. */
+    achieved: number;
+    min: number;
+    max: number;
+    skipped: boolean;
+}
+
+export interface EncodeResult {
+    bytes: Uint8Array;
+    /** Lossy PNG only. */
+    png?: PngQualityReport;
+}
+
 /** Options accepted by the public encode(). Quality is the abstract 0-10 scale. */
 export interface EncodeOptions {
     /** 0-10, higher is better. Default 7. Mapped per codec in quality.ts. */
@@ -49,12 +76,25 @@ export interface EncodeOptions {
      */
     pngMode?: PngMode;
     /**
+     * PNG lossy only. Replaces the 0-10 scale for that path: the preset's max
+     * is handed to the quantizer and its min is enforced afterwards. Defaults
+     * to DEFAULT_PNG_PRESET.
+     */
+    pngPreset?: PngPreset;
+    /**
      * Calibration seam. Bypasses the 0-10 curve and hands the encoder this
      * native value directly. Only /bench sets it -- it exists so a curve can be
      * measured against native quality without editing quality.ts between runs.
      * Nothing in the product path passes it.
      */
     nativeOverride?: number;
+    /**
+     * PDF only. On (the default) keeps levels 1-2: cleanup plus recompressing
+     * embedded images, text stays selectable. Off additionally tries level 3
+     * (flatten each page to an image via pdfjs-dist) and keeps whichever
+     * result is smaller. Ignored by every other format.
+     */
+    keepTextSelectable?: boolean;
 }
 
 export interface ImageDataLike {

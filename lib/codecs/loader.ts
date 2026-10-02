@@ -22,26 +22,32 @@ const cache = new Map<string, Promise<WebAssembly.Module>>();
 const WASM_BASE = "/wasm/";
 
 /**
- * Resolve a vendored binary to an absolute URL.
+ * Resolve a root-relative, vendored-under-/public/ path to an absolute URL.
  *
  * This has to be absolute, and the reason only shows up in a production build.
  * Turbopack ships the codec worker as a `blob:` URL, so inside the worker
- * `self.location.href` is `blob:http://host/<uuid>` and a root-relative
- * `/wasm/x.wasm` has no path to resolve against -- `fetch` rejects with
- * "Failed to parse URL". Under `next dev --webpack` the worker is served over
- * http and the relative path resolves fine, which is exactly the dev/build
- * divergence CLAUDE.md warns about.
+ * `self.location.href` is `blob:http://host/<uuid>` and a root-relative path
+ * has no origin to resolve against -- `fetch` (or a nested `new Worker(...)`)
+ * rejects with "Failed to parse URL". Under `next dev --webpack` the worker is
+ * served over http and the relative path resolves fine, which is exactly the
+ * dev/build divergence CLAUDE.md warns about.
  *
  * `location.origin` is still the page's origin for a same-origin blob worker,
  * so it is the right base. If it is unavailable or opaque we fall back to the
  * relative path rather than fabricating an origin -- a same-origin request is
  * the only kind this project is allowed to make.
+ *
+ * Shared by every vendored asset this worker loads: wasm binaries here, and
+ * the pdfjs-dist worker script in `pdfFlatten.ts`.
  */
-function wasmUrl(file: string): string {
-    const path = `${WASM_BASE}${file}`;
+export function resolveAssetUrl(path: string): string {
     const origin = typeof self !== "undefined" ? self.location?.origin : undefined;
     if (!origin || origin === "null") return path;
     return `${origin}${path}`;
+}
+
+function wasmUrl(file: string): string {
+    return resolveAssetUrl(`${WASM_BASE}${file}`);
 }
 
 export function loadWasm(file: string): Promise<WebAssembly.Module> {

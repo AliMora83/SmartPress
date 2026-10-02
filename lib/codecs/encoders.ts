@@ -1,6 +1,7 @@
 import { loadWasm } from "./loader";
-import { DEFAULT_PNG_MODE, resolveEffort, resolveNative } from "./quality";
-import type { EncodeOptions, Format, ImageDataLike } from "./types";
+import { DEFAULT_PNG_MODE, DEFAULT_PNG_PRESET, PNG_PRESETS, resolveEffort, resolveNative } from "./quality";
+import { measureQuality } from "./pngQuality";
+import type { EncodeOptions, EncodeResult, Format, ImageDataLike } from "./types";
 
 /**
  * Per-format encoders, each behind a dynamic import so nothing loads until the
@@ -10,7 +11,7 @@ import type { EncodeOptions, Format, ImageDataLike } from "./types";
  * Each encoder is initialised once and memoised.
  */
 
-type Encoder = (image: ImageDataLike, options: EncodeOptions) => Promise<Uint8Array>;
+type Encoder = (image: ImageDataLike, options: EncodeOptions) => Promise<EncodeResult>;
 
 const ready = new Map<Format, Promise<Encoder>>();
 
@@ -33,7 +34,7 @@ async function makeJpeg(): Promise<Encoder> {
     await init(module);
     return async (image, options) => {
         const buf = await encode(image as ImageData, { quality: resolveNative("jpeg", options) });
-        return new Uint8Array(buf);
+        return { bytes: new Uint8Array(buf) };
     };
 }
 
@@ -46,7 +47,7 @@ async function makeWebp(): Promise<Encoder> {
     await init(module);
     return async (image, options) => {
         const buf = await encode(image as ImageData, { quality: resolveNative("webp", options) });
-        return new Uint8Array(buf);
+        return { bytes: new Uint8Array(buf) };
     };
 }
 
@@ -81,12 +82,14 @@ async function makePng(): Promise<Encoder> {
         import("./vendor/pngquant.js"),
         loadWasm("pngquant_bg.wasm"),
     ]);
-    const { default: init, optimize } = glue as unknown as {
+    const { default: init, optimize, png_to_rgba } = glue as unknown as {
         default: (arg: { module_or_path: WebAssembly.Module }) => Promise<unknown>;
         optimize: (
             data: Uint8ClampedArray, width: number, height: number,
             options: Record<string, unknown>,
         ) => Uint8Array;
+        /** [rgba buffer, width]; height is length / width / 4. */
+        png_to_rgba: (data: Uint8Array) => [Uint8Array, number];
     };
     await init({ module_or_path: module });
     return async (image, options) => {
@@ -99,8 +102,8 @@ async function makePng(): Promise<Encoder> {
         // fields have no defaults -- a partial object fails inside wasm with an
         // opaque `unwrap_throw` panic. So both paths pass every field and differ
         // only in `quantize` and what the control feeds.
-        return optimize(image.data, image.width, image.height, {
-            quality: lossless ? 100 : resolveNative("png", options),
+        const run = (quality: number) => optimize(image.data, image.width, image.height, {
+            quality,
             quantize: !lossless,
             speed: 4,
             dithering: 1,
@@ -112,7 +115,34 @@ async function makePng(): Promise<Encoder> {
             colors: 256,
             bit_depth: 8,
         });
+
+        if (lossless) return { bytes: run(100) };
+
+        // `nativeOverride` is /bench's calibration seam: a bare native number,
+        // no preset, no floor.
+        if (options.nativeOverride !== undefined) return { bytes: run(options.nativeOverride) };
+
+        // The wasm's `quality` is imagequant's max; it has no min, so it never
+        // refuses an image. The preset's min is enforced here by measuring the
+        // output -- see pngQuality.ts for what that measurement is.
+        const preset = options.pngPreset ?? DEFAULT_PNG_PRESET;
+        const { min, max } = PNG_PRESETS[preset];
+        const bytes = run(max);
+        const [rgba] = png_to_rgba(bytes);
+        const achieved = measureQuality(image.data, new Uint8ClampedArray(rgba));
+        return { bytes, png: { preset, achieved, min, max, skipped: achieved < min } };
     };
+}
+
+/**
+ * PDF never reaches this factory. `worker.ts` branches to `compressPdf()`
+ * before calling `encode()` at all -- a PDF's embedded JPEGs go through
+ * `makeJpeg()` above directly, the same encoder any standalone JPEG uses.
+ * This entry exists only so `Format` including "pdf" doesn't leave the
+ * `Record` incomplete.
+ */
+async function makePdfPlaceholder(): Promise<Encoder> {
+    throw new Error("pdf is not encoded via getEncoder() -- see lib/codecs/pdf.ts");
 }
 
 const FACTORIES: Record<Format, () => Promise<Encoder>> = {
@@ -120,6 +150,7 @@ const FACTORIES: Record<Format, () => Promise<Encoder>> = {
     png: makePng,
     webp: makeWebp,
     avif: makeAvif,
+    pdf: makePdfPlaceholder,
 };
 
 export function getEncoder(format: Format): Promise<Encoder> {

@@ -3,13 +3,15 @@
 import { useState, useRef, useEffect, useCallback, DragEvent } from "react";
 import {
     Upload, Download, CheckCircle, MinusCircle, X, Image as ImageIcon,
-    Settings2, RefreshCw, Clock, Cpu, AlertCircle, Info,
+    Settings2, RefreshCw, Clock, Cpu, AlertCircle, Info, FileText,
 } from "lucide-react";
 import { get, set, del } from "idb-keyval";
 import { isWorthKeeping } from "@/lib/compression";
 import { getPool, isCancelled, type Stage } from "@/lib/codecs/pool";
-import { CAPABILITIES, DEFAULT_QUALITY, DEFAULT_PNG_MODE, formatFromMime } from "@/lib/codecs";
-import type { Format, PngMode } from "@/lib/codecs";
+import {
+    CAPABILITIES, DEFAULT_QUALITY, DEFAULT_PNG_MODE, DEFAULT_PNG_PRESET, PNG_PRESETS, formatFromMime,
+} from "@/lib/codecs";
+import type { Format, PngMode, PngPreset } from "@/lib/codecs";
 import { appError, classify, MAX_INPUT_BYTES, type AppError } from "@/lib/errors";
 import { webSaver } from "@/lib/save/web";
 import type { SaveAllResult, SaveItem } from "@/lib/save/types";
@@ -38,8 +40,12 @@ import type { SaveAllResult, SaveItem } from "@/lib/save/types";
  * They are separate because they answer different questions: *can* we encode
  * it, and *should* we offer it. Collapsing them into one flag would take WebP
  * with it.
+ *
+ * PDF joined this list in Sprint 2.1. It doesn't need a capability gate the
+ * way AVIF did -- `lib/codecs/pdf.ts` has no build-time failure mode -- so
+ * it's simply always on once added here.
  */
-const PHASE1_INPUT_FORMATS: Format[] = ["jpeg", "png"];
+const PHASE1_INPUT_FORMATS: Format[] = ["jpeg", "png", "pdf"];
 const ACCEPTED_FORMATS = PHASE1_INPUT_FORMATS.filter(f => CAPABILITIES[f].available !== false);
 const ACCEPTED_TYPES = ACCEPTED_FORMATS.map(f => CAPABILITIES[f].mimeType);
 const ACCEPT_ATTR = ACCEPTED_TYPES.join(",");
@@ -71,9 +77,16 @@ interface Settings {
     /** The abstract 0-10 control. Curves live in lib/codecs/quality.ts. */
     quality: number;
     pngMode: PngMode;
+    /** Lossy PNG only. Replaces the 0-10 scale on that path. */
+    pngPreset: PngPreset;
+    /** PDF only. On (default) keeps levels 1-2; off allows level 3 flatten. */
+    keepTextSelectable: boolean;
 }
 
-const DEFAULT_SETTINGS: Settings = { quality: DEFAULT_QUALITY, pngMode: DEFAULT_PNG_MODE };
+const DEFAULT_SETTINGS: Settings = {
+    quality: DEFAULT_QUALITY, pngMode: DEFAULT_PNG_MODE, pngPreset: DEFAULT_PNG_PRESET,
+    keepTextSelectable: true,
+};
 
 // --- Types ---
 
@@ -99,7 +112,14 @@ interface FileItem {
     alreadyOptimal?: boolean;
     /** How this row's result was last handed off, once lib/save/ has done it. */
     saved?: "written" | "sent";
+    /** PDF only, set once compression completes. */
+    pageCount?: number;
+    pdfNote?: "signed" | "flatten-not-smaller" | "flatten-failed";
+    /** Lossy PNG only. Set when the encode landed below the preset's minimum quality; the original was kept. */
+    pngSkip?: { achieved: number; min: number };
 }
+
+const PNG_PRESET_LABEL: Record<PngPreset, string> = { min: "Min", medium: "Medium", max: "Max" };
 
 const STATUS_CONFIG: Record<FileStatus, { label: string; color: string; icon: typeof Clock }> = {
     pending: { label: "Ready", color: "#6b7280", icon: Clock },
@@ -189,6 +209,10 @@ export default function Compressor() {
                     setSettings({
                         quality: typeof stored.quality === "number" ? stored.quality : DEFAULT_QUALITY,
                         pngMode: stored.pngMode === "lossless" ? "lossless" : DEFAULT_PNG_MODE,
+                        pngPreset: stored.pngPreset && stored.pngPreset in PNG_PRESETS
+                            ? stored.pngPreset : DEFAULT_PNG_PRESET,
+                        keepTextSelectable: typeof stored.keepTextSelectable === "boolean"
+                            ? stored.keepTextSelectable : true,
                     });
                 }
                 // Drop v1's keys, which stored whole file items. Doing it here
@@ -242,7 +266,9 @@ export default function Compressor() {
                 progress: 0,
                 // Object URL, not a base64 data URL: a data URL for a 6 MB photo
                 // is an 8 MB string held in state for as long as the row lives.
-                preview: supported && !tooBig ? URL.createObjectURL(file) : undefined,
+                // PDF has no preview -- an <img> can't render one, and there's
+                // no cheap raster to hand it; the row falls back to an icon.
+                preview: supported && !tooBig && format !== "pdf" ? URL.createObjectURL(file) : undefined,
                 error,
                 originalSize: file.size,
             };
@@ -298,6 +324,7 @@ export default function Compressor() {
             startedAt: Date.now(), error: undefined,
             resultBlob: undefined, newSize: undefined,
             alreadyOptimal: undefined, saved: undefined,
+            pageCount: undefined, pdfNote: undefined, pngSkip: undefined,
         } : f));
 
         try {
@@ -308,6 +335,8 @@ export default function Compressor() {
                 options: {
                     quality: settingsRef.current.quality,
                     pngMode: settingsRef.current.pngMode,
+                    pngPreset: settingsRef.current.pngPreset,
+                    keepTextSelectable: settingsRef.current.keepTextSelectable,
                 },
                 onProgress: (progress, stage) => setFiles(prev => prev.map(f =>
                     f.id === id ? { ...f, status: "processing", progress, stage } : f)),
@@ -315,9 +344,14 @@ export default function Compressor() {
 
             // The keep-original boundary is lib/compression.ts's, not restated
             // here. Below MIN_GAIN_RATIO the encode spent a generation of quality
-            // for nothing, so the user gets their own file back.
+            // for nothing, so the user gets their own file back. A signed PDF
+            // (result.pdfNote === "signed") lands here too: pdf.ts hands back
+            // the original bytes untouched, so the gain is zero by construction.
             const outBytes = result.bytes.byteLength;
-            const worthIt = isWorthKeeping(item.file.size, outBytes);
+            // A lossy PNG that landed below its preset's minimum is skipped:
+            // the same hand-back as "not worth it", with its own reason.
+            const skipped = result.png?.skipped === true;
+            const worthIt = !skipped && isWorthKeeping(item.file.size, outBytes);
             const output: Blob = worthIt
                 ? new Blob([result.bytes as unknown as BlobPart], { type: cap.mimeType })
                 : item.file;
@@ -329,6 +363,10 @@ export default function Compressor() {
                 originalSize: item.file.size,
                 newSize: output.size,
                 alreadyOptimal: !worthIt,
+                pageCount: result.pageCount,
+                pdfNote: result.pdfNote,
+                pngSkip: skipped && result.png
+                    ? { achieved: result.png.achieved, min: result.png.min } : undefined,
             } : f));
         } catch (e) {
             // A cancelled row was removed or cleared; there is nothing left to
@@ -449,30 +487,58 @@ export default function Compressor() {
                 );
             }
 
-            case "done":
+            case "done": {
+                const pageBadge = fileItem.format === "pdf" && fileItem.pageCount ? (
+                    <span className="text-xs text-gray-400">
+                        {fileItem.pageCount} {fileItem.pageCount === 1 ? "page" : "pages"}
+                    </span>
+                ) : null;
+
                 if (fileItem.alreadyOptimal) {
                     // Quiet, secondary state: nothing changed, so this must not
-                    // read as a successful compression.
+                    // read as a successful compression. A signed PDF gets its
+                    // own reason -- it was never attempted, not just unhelpful.
                     return (
                         <div className="flex items-center gap-2 mt-2 text-gray-500">
                             <MinusCircle size={14} className="text-gray-400" />
-                            <span className="text-sm">No size reduction — original kept</span>
+                            <span className="text-sm">
+                                {fileItem.pdfNote === "signed"
+                                    ? "Signed PDF left unchanged, compressing would break the signature."
+                                    : fileItem.pngSkip
+                                        ? `Skipped — couldn’t reach the minimum quality for this preset (${fileItem.pngSkip.achieved} < ${fileItem.pngSkip.min}). Original kept.`
+                                        : "No size reduction — original kept"}
+                            </span>
+                            {pageBadge}
                         </div>
                     );
                 }
                 return (
                     fileItem.originalSize && fileItem.newSize ? (
-                        <div className="flex items-center gap-2 mt-2 text-gray-500">
-                            <CheckCircle size={14} className="text-green-500" />
-                            <span className="text-sm">Compressed</span>
-                            <span className="text-sm">→</span>
-                            <span className="text-sm font-bold text-green-700">{formatBytes(fileItem.newSize)}</span>
-                            <span className="text-xs font-bold bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
-                                -{Math.round((1 - fileItem.newSize / fileItem.originalSize) * 100)}%
-                            </span>
+                        <div className="flex flex-col gap-1 mt-2">
+                            <div className="flex items-center gap-2 text-gray-500">
+                                <CheckCircle size={14} className="text-green-500" />
+                                <span className="text-sm">Compressed</span>
+                                <span className="text-sm">→</span>
+                                <span className="text-sm font-bold text-green-700">{formatBytes(fileItem.newSize)}</span>
+                                <span className="text-xs font-bold bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
+                                    -{Math.round((1 - fileItem.newSize / fileItem.originalSize) * 100)}%
+                                </span>
+                                {pageBadge}
+                            </div>
+                            {fileItem.pdfNote === "flatten-not-smaller" && (
+                                <p className="text-xs text-gray-400 pl-[22px]">
+                                    Flattening wouldn&rsquo;t save more — text kept selectable.
+                                </p>
+                            )}
+                            {fileItem.pdfNote === "flatten-failed" && (
+                                <p className="text-xs text-amber-600 pl-[22px]">
+                                    Flattening failed — text kept selectable.
+                                </p>
+                            )}
                         </div>
                     ) : null
                 );
+            }
 
             case "error":
                 return (
@@ -497,6 +563,12 @@ export default function Compressor() {
 
     const anyPending = files.some(f => f.status === "pending");
     const anyDone = files.some(f => f.status === "done" && f.resultBlob);
+    const anyPdf = files.some(f => f.format === "pdf");
+    // The 0-10 slider still drives JPEG, PDF images and lossless-PNG effort.
+    // Lossy PNG uses the presets instead, so the slider only shows when
+    // something in the queue (or the lossless mode) actually reads it.
+    const anyNonPng = files.some(f => f.format && f.format !== "png");
+    const showSlider = anyNonPng || settings.pngMode === "lossless";
 
     return (
         <div className={`w-full h-full ${files.length === 0 ? 'min-h-[50vh] md:min-h-screen flex items-center justify-center' : 'py-6 md:p-12'}`}>
@@ -517,7 +589,7 @@ export default function Compressor() {
                             {dragActive ? "Drop files here" : "Click or drag files to add them"}
                         </p>
                         <p className="text-sm text-gray-400 mt-2 text-center">
-                            Images ({ACCEPTED_LABEL}) • Multiple files supported
+                            Images and PDFs ({ACCEPTED_LABEL}) • Multiple files supported
                         </p>
                         <input
                             id="file-upload"
@@ -547,6 +619,7 @@ export default function Compressor() {
                               means quality on every lossy path and effort on lossless
                               PNG, so it is never dead and never applies to nothing.
                             */}
+                            {showSlider && (
                             <div className="space-y-3">
                                 <div className="flex justify-between items-center">
                                     <label htmlFor="quality" className="text-sm font-bold text-gray-700">
@@ -574,6 +647,7 @@ export default function Compressor() {
                                     </p>
                                 )}
                             </div>
+                            )}
 
                             <div className="space-y-2">
                                 <span className="text-sm font-bold text-gray-700">PNG mode</span>
@@ -608,6 +682,60 @@ export default function Compressor() {
                                     </label>
                                 </div>
                             </div>
+
+                            {settings.pngMode === "lossy" && (
+                                <fieldset className="space-y-2">
+                                    <legend className="text-sm font-bold text-gray-700">PNG compression</legend>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        {(Object.keys(PNG_PRESETS) as PngPreset[]).map(p => (
+                                            <label
+                                                key={p}
+                                                className={`cursor-pointer rounded-lg border px-3 py-2 text-center text-sm font-medium transition ${
+                                                    settings.pngPreset === p
+                                                        ? "border-blue-600 bg-blue-50 text-blue-700"
+                                                        : "border-gray-200 bg-white text-gray-700 hover:border-blue-300"}`}
+                                            >
+                                                <input
+                                                    type="radio" name="png-preset" value={p}
+                                                    checked={settings.pngPreset === p}
+                                                    onChange={() => setSettings(s => ({ ...s, pngPreset: p }))}
+                                                    className="sr-only"
+                                                />
+                                                {PNG_PRESET_LABEL[p]}
+                                                <span className="block text-[11px] font-normal text-gray-500">
+                                                    {PNG_PRESETS[p].min}–{PNG_PRESETS[p].max}
+                                                </span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                    <p className="text-xs text-gray-500">
+                                        Min keeps the most quality, Max compresses hardest. A PNG that can&rsquo;t
+                                        reach the preset&rsquo;s lower number is skipped and left as-is.
+                                    </p>
+                                </fieldset>
+                            )}
+
+                            {anyPdf && (
+                                <div className="space-y-2 border-t border-gray-200 pt-4">
+                                    <label className="flex items-start gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={settings.keepTextSelectable}
+                                            onChange={(e) => setSettings(s => ({ ...s, keepTextSelectable: e.target.checked }))}
+                                            className="mt-1 accent-blue-600"
+                                        />
+                                        <span className="text-sm text-gray-700">
+                                            <span className="font-medium">Keep text selectable</span>
+                                            <span className="block text-xs text-gray-500">
+                                                On (default): PDF text and links stay usable. Off: pages may
+                                                also be flattened to images for extra savings, if that would
+                                                actually save more — text is no longer selectable or
+                                                searchable afterward.
+                                            </span>
+                                        </span>
+                                    </label>
+                                </div>
+                            )}
 
                             <p className="text-xs text-gray-500 border-t border-gray-200 pt-4">
                                 Output keeps the format it came in as.
@@ -742,7 +870,9 @@ export default function Compressor() {
                                                 <img src={fileItem.preview} alt="" className="w-full h-full object-cover" />
                                             ) : (
                                                 <div className="w-full h-full flex items-center justify-center">
-                                                    <ImageIcon className="text-gray-400" size={32} />
+                                                    {fileItem.format === "pdf"
+                                                        ? <FileText className="text-gray-400" size={32} />
+                                                        : <ImageIcon className="text-gray-400" size={32} />}
                                                 </div>
                                             )}
                                         </div>

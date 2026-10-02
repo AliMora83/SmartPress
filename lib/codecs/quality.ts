@@ -1,4 +1,4 @@
-import type { EncodeOptions, Format, PngMode } from "./types";
+import type { EncodeOptions, Format, PngMode, PngPreset } from "./types";
 
 /**
  * The universal control is 0-10, higher is better, default 7.
@@ -21,6 +21,23 @@ export const DEFAULT_QUALITY = 7;
  * panel makes the choice visible rather than silent -- the plan's PNG decision.
  */
 export const DEFAULT_PNG_MODE: PngMode = "lossy";
+
+/**
+ * Lossy PNG presets as pngquant `--quality min-max` ranges. They replace the
+ * calibrated 0-10 curve (`PNG_ANCHORS`) on the lossy PNG path only; JPEG, WebP
+ * and lossless-PNG effort still use the scale.
+ *
+ * `max` is what the quantizer aims for (it stops adding palette entries once
+ * reached). `min` is the floor: if the best 256-colour result is below it, the
+ * file is skipped rather than shipped looking worse than the user asked for.
+ */
+export const PNG_PRESETS: Record<PngPreset, { min: number; max: number }> = {
+    min: { min: 60, max: 80 },
+    medium: { min: 40, max: 60 },
+    max: { min: 15, max: 40 },
+};
+
+export const DEFAULT_PNG_PRESET: PngPreset = "medium";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -140,6 +157,10 @@ export function nativeQuality(format: Format, scale: number): number {
         case "png": return pngQuality(scale);
         case "webp": return webpQuality(scale);
         case "avif": return avifQuality(scale);
+        case "pdf": throw new Error(
+            "nativeQuality: pdf has no curve of its own -- embedded images are " +
+            "recompressed via resolveNative(\"jpeg\", options), same as any JPEG.",
+        );
     }
 }
 

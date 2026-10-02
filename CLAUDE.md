@@ -9,7 +9,8 @@ Native browser decode + vendored wasm encoders.
 
 **Licence: GPL-3.0-or-later.** SmartPress vendors libimagequant, which is GPL for
 open-source use, and serves that binary to every visitor. `LICENSE`, `NOTICE` and
-`public/wasm/PROVENANCE.md` carry the terms, and the `/licenses` route makes them
+`public/wasm/PROVENANCE.md` (and, for the vendored `pdfjs-dist` worker/fonts/CMaps,
+`public/pdfjs/PROVENANCE.md`) carry the terms, and the `/licenses` route makes them
 reachable from the running app — which is where the obligation actually lands. A
 new dependency gets a `NOTICE` entry before it ships.
 
@@ -101,6 +102,40 @@ leaving is a one-line change in `capabilities.ts`.
 Changing an anchor changes output bytes for every user — re-run the sweep and
 record the table, rather than adjusting a number because it looks nicer.
 
+## PDF: three levels, level 3 is opt-in
+
+`lib/codecs/pdf.ts` handles `format === "pdf"` behind the same worker/pool
+interface images use. Three levels, from the Sprint 2.1 spike (`AI-Logs.md` has
+the measured table):
+
+1. **Cleanup** — `pdf-lib` re-save, strips metadata, enables object streams.
+2. **Recompress embedded images** (the default — `keepTextSelectable: true`).
+   Walks every `/Image` XObject reachable from the page tree (including nested
+   inside `/Form` XObjects) and recompresses `/DCTDecode` JPEGs and 8bpc
+   `/FlateDecode` raw bitmaps through the same native `decode()`/`encode()` path
+   a standalone JPEG uses. Text and links stay selectable and searchable.
+   Levels 1–2 need only `pdf-lib`.
+3. **Flatten every page to a JPEG via `pdfjs-dist`** (opt-in —
+   `keepTextSelectable: false`), rebuilding the PDF around the rendered pages.
+   Text and links are gone afterward, so `compressPdf()` only keeps this result
+   if it actually beats level 2's byte count; otherwise the row says so
+   ("Flattening wouldn't save more"). `pdfjs-dist` is dynamically imported from
+   `lib/codecs/pdfFlatten.ts`, reached only when a flatten is actually
+   attempted — a PDF compressed at the default setting, or any image-only
+   batch, never loads it.
+
+**Typed error states, not generic failures.** `PdfPasswordError` and
+`PdfCorruptError` map to their own `AppError` codes in `lib/errors.ts`, neither
+retryable (the same bytes won't parse differently twice). A **signed PDF** is
+deliberately not an error — pdf-lib has no notion of a signature, and re-saving
+would silently invalidate one, so it's detected up front and returned
+byte-for-byte untouched with a `"signed"` note; `isWorthKeeping()` then chooses
+"keep original" on its own from the zero gain. A **failed flatten** is also not
+an error — the batch already has a valid level 2 result — but it is not silent
+either: `"flatten-failed"` is a different note than `"flatten-not-smaller"`, so
+the row can say "we couldn't" instead of quietly landing on level 2 as if
+flattening had simply not helped.
+
 ## Workers see a different world than the page
 
 Encoding and decoding run in a worker, and in a production build Turbopack ships
@@ -113,6 +148,27 @@ that worker as a `blob:` URL. Two consequences that only appear after `next buil
   and to the DevTools network panel. Per-format lazy loading is therefore proven
   behaviourally — remove a binary, confirm the other formats still work, and keep a
   positive control so the test cannot pass vacuously.
+
+**A library assuming `document` exists is the same class of bug, one level up.**
+The PDF flatten path (`lib/codecs/pdfFlatten.ts`) hit this three times before it
+worked on a single real fixture: `pdfjs-dist`'s annotation layer, its font
+loader, and its default `CanvasFactory`/`FilterFactory` all reach for the global
+`document` — to create widget DOM nodes, register `@font-face`/`FontFace`
+outlines, or back a canvas/SVG filter — none of which exists inside a Worker.
+Each one throws a plain `TypeError` (`Cannot read properties of undefined
+(reading 'createElement')`, then `'URL'`), not anything that names `document`,
+so the fix is to read the stack, not guess from the message. The fix is the
+same shape every time: tell the library not to touch the DOM at all rather
+than polyfill one. `disableFontFace: true` makes pdfjs draw glyphs as canvas
+paths instead of registering fonts; `annotationMode: AnnotationMode.DISABLE`
+skips the widget layer; a custom `CanvasFactory` backed by `OffscreenCanvas`
+and a no-op `FilterFactory` (mirroring pdfjs's own unexported
+`NodeFilterFactory` — its answer to the identical gap in Node.js) replace the
+two `document`-backed defaults. A PDF that doesn't embed one of its fonts then
+needs pdfjs's own standard-font substitutes and CMaps to draw anything
+correctly, which is why those are vendored under `/public/pdfjs/` too (see
+`public/pdfjs/PROVENANCE.md`) rather than left to pdfjs's own (CDN-reaching)
+defaults.
 
 Errors also cross that boundary as strings, not `Error` instances. See
 `Error Handling`.
