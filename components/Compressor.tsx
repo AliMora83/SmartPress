@@ -117,6 +117,10 @@ interface FileItem {
     pdfNote?: "signed" | "flatten-not-smaller" | "flatten-failed";
     /** Lossy PNG only. Set when the encode landed below the preset's minimum quality; the original was kept. */
     pngSkip?: { achieved: number; min: number };
+    /** Lossy PNG only. A WebP of the same pixels that beats the PNG result enough to offer. */
+    webpOffer?: { blob: Blob; savedRatio: number };
+    /** Set once the user has swapped the output for the WebP. */
+    convertedTo?: "webp";
 }
 
 const PNG_PRESET_LABEL: Record<PngPreset, string> = { min: "Min", medium: "Medium", max: "Max" };
@@ -135,8 +139,10 @@ const STAGE_LABEL: Record<Stage, string> = {
 };
 
 /** Only files SmartPress actually re-encoded carry the prefix. */
-const outputName = (f: FileItem) =>
-    f.alreadyOptimal ? f.file.name : `smartpress_${f.file.name}`;
+const outputName = (f: FileItem) => {
+    if (f.convertedTo === "webp") return `smartpress_${f.file.name.replace(/\.[^./\\]+$/, "")}.webp`;
+    return f.alreadyOptimal ? f.file.name : `smartpress_${f.file.name}`;
+};
 
 const formatBytes = (bytes: number) => {
     if (bytes === 0) return "0 Bytes";
@@ -325,6 +331,7 @@ export default function Compressor() {
             resultBlob: undefined, newSize: undefined,
             alreadyOptimal: undefined, saved: undefined,
             pageCount: undefined, pdfNote: undefined, pngSkip: undefined,
+            webpOffer: undefined, convertedTo: undefined,
         } : f));
 
         try {
@@ -365,6 +372,12 @@ export default function Compressor() {
                 alreadyOptimal: !worthIt,
                 pageCount: result.pageCount,
                 pdfNote: result.pdfNote,
+                webpOffer: result.webp
+                    ? {
+                        blob: new Blob([result.webp.bytes as unknown as BlobPart], { type: CAPABILITIES.webp.mimeType }),
+                        savedRatio: result.webp.savedRatio,
+                    }
+                    : undefined,
                 pngSkip: skipped && result.png
                     ? { achieved: result.png.achieved, min: result.png.min } : undefined,
             } : f));
@@ -378,6 +391,28 @@ export default function Compressor() {
                 : f));
         }
     }, [pool]);
+
+    /**
+     * Swap a PNG row's output for the WebP the nudge offered. Replaces rather
+     * than adds: the row has one output, and it is now the WebP under a .webp
+     * name. `saved` is cleared because whatever was handed off before is no
+     * longer this row's result.
+     */
+    const convertToWebp = useCallback((id: string) => {
+        setFiles(prev => prev.map(f => {
+            if (f.id !== id || !f.webpOffer) return f;
+            return {
+                ...f,
+                resultBlob: f.webpOffer.blob,
+                newSize: f.webpOffer.blob.size,
+                alreadyOptimal: false,
+                pngSkip: undefined,
+                convertedTo: "webp",
+                webpOffer: undefined,
+                saved: undefined,
+            };
+        }));
+    }, []);
 
     const compressAll = useCallback(() => {
         // Dispatched together, not awaited in sequence: the pool is what decides
@@ -929,6 +964,25 @@ export default function Compressor() {
                                             </div>
                                         </div>
                                     </div>
+
+                                    {fileItem.status === "done" && fileItem.webpOffer && (
+                                        <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2">
+                                            <p className="text-xs text-blue-800">
+                                                WebP would save an additional{" "}
+                                                <span className="font-bold">{Math.round(fileItem.webpOffer.savedRatio * 100)}%</span>
+                                                {" "}— Convert?
+                                            </p>
+                                            <button
+                                                onClick={() => convertToWebp(fileItem.id)}
+                                                className="flex-shrink-0 text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded transition font-bold uppercase tracking-wider"
+                                            >
+                                                Convert
+                                            </button>
+                                        </div>
+                                    )}
+                                    {fileItem.status === "done" && fileItem.convertedTo === "webp" && (
+                                        <p className="mt-3 text-xs text-gray-500">Converted to WebP.</p>
+                                    )}
                                 </div>
                             ))}
                         </div>

@@ -39,6 +39,20 @@ export const PNG_PRESETS: Record<PngPreset, { min: number; max: number }> = {
 
 export const DEFAULT_PNG_PRESET: PngPreset = "medium";
 
+/**
+ * The WebP quality tier that stands in for each PNG preset when the WebP nudge
+ * compares them, on the 0-10 scale (so it goes through `webpQuality`, 35-95):
+ * Min 8 -> 83, Medium 6 -> 71, Max 4 -> 59. Chosen to keep the ordering and
+ * roughly match each preset's intent, not measured for perceptual equivalence --
+ * the two codecs degrade differently and no metric here compares them. The
+ * sweep that justified these is in AI-Logs.md (Sprint 2.3).
+ */
+export const WEBP_SCALE_FOR_PNG_PRESET: Record<PngPreset, number> = {
+    min: 8,
+    medium: 6,
+    max: 4,
+};
+
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /** Map 0-10 onto [lo, hi] linearly, rounded. */

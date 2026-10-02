@@ -6,6 +6,9 @@
 > is the permanent web delivery path. Phase 2 and Phase 3 are renumbered around PDF,
 > AVIF, format conversion, and the desktop build. See the Sprint 1.4 entry in
 > `AI-Logs.md` for why.
+> Revised 2026-10-02 (Sprint 2.3): AVIF is removed from Sprint 2.2 and from Phase 2
+> entirely — it is unscheduled until the Turbopack build stall has a fix. Sprint 2.2
+> became PNG presets, 2.3 is the WebP nudge, and format conversion moved to 2.4.
 
 ## Mission
 
@@ -42,7 +45,7 @@ These apply to every sprint. A sprint isn't done if it breaks one.
 | Milestone | Version | Meaning |
 |---|---|---|
 | End of Phase 1 | `3.0.0-alpha.1` | Backend gone, real codecs, images work |
-| End of Phase 2 | `3.0.0` | Images GA — PDF, AVIF, format conversion |
+| End of Phase 2 | `3.0.0` | Images GA — PDF, PNG presets, WebP nudge, format conversion |
 | End of Phase 3 | `3.1.0` | Installable offline (web + Tauri desktop), redesigned UI |
 
 ---
@@ -119,34 +122,55 @@ guessed at without a fixture that hits it. Full detail, including the three
 
 ---
 
-### Sprint 2.2 — PNG modes + AVIF
+### Sprint 2.2 — PNG presets ✅
 
-PNG's lossy/lossless split already shipped early, in Sprint 1.3 (`CLAUDE.md`,
-`lib/codecs/quality.ts`) — the real work left here is AVIF.
+Lossy PNG replaces the 0–10 slider with three presets mapped to pngquant
+`min`–`max` quality ranges: **Min 60–80, Medium 40–60, Max 15–40** (default Medium).
+The vendored wasm exposes only `max`, so `min` is enforced in JS by measuring the
+output (`lib/codecs/pngQuality.ts`); a file below its preset's minimum is **skipped**
+and the original kept. The slider stays for JPEG, PDF images and lossless-PNG effort.
+Measured on P1–P4 in `AI-Logs.md`. The emulation is approximate — exact semantics
+need a wasm rebuilt with min/max exposed.
 
-**Tasks**
-
-- [ ] Fix the Turbopack production-build stall on `@jsquash/avif` (`next build`, not
-      `next dev` — see `CLAUDE.md`'s bundler warning). This is the actual gate; flipping
-      `CAPABILITIES.avif.available` to `true` is one line once it's fixed, by design
-      (`encoders.ts`).
-- [ ] AVIF encode is slow. Surface an honest time estimate rather than looking hung.
-- [ ] Re-run the fixture sweep with AVIF included and record it in `AI-Logs.md`, the
-      same way the JPEG/PNG curves were calibrated in 1.3.
-- [ ] Confirm the accept-filter/capability double gate in `Compressor.tsx` still holds:
-      AVIF becomes available by construction once the descriptor says so, no separate
-      list to remember to update.
-
-**Done when:** AVIF encodes in a production build, off the main thread, at a calibrated
-default quality — and dropping only JPEG/PNG files still never loads it.
+**AVIF was removed from this sprint's scope.** The `@jsquash/avif` Turbopack build
+stall, the AVIF time estimate, and the AVIF fixture sweep are not scheduled. AVIF
+stays stubbed (`available: false`, `lib/codecs/encoders.ts`) with its restore path
+intact; picking it up again starts with the build fix, not the flag.
 
 ---
 
-### Sprint 2.3 — Format Conversion
+### Sprint 2.3 — WebP Nudge ✅
+
+After a **lossy PNG** compresses, encode the same pixels as WebP (`@jsquash/webp`) at
+the matching quality tier and, if it beats the PNG result by more than 10%, offer it.
 
 **Tasks**
 
-- [ ] Output format: `Keep original | JPEG | WebP | AVIF | PNG`.
+- [x] Tier mapping: each PNG preset → a WebP quality (`WEBP_SCALE_FOR_PNG_PRESET` in
+      `quality.ts`), with the sweep recorded in `AI-Logs.md`.
+- [x] Worker computes the WebP alternative after a PNG result that cleared its
+      preset minimum. Not for skipped files, lossless PNG, JPEG, or PDF.
+- [x] Threshold lives with the other keep/offer rules in `lib/compression.ts`
+      (`WEBP_NUDGE_MIN_GAIN`, 10% relative to the PNG result).
+- [x] Nudge below the row: "WebP would save an additional X% — Convert?". One click
+      replaces the row's output with the WebP under a `.webp` name.
+- [x] A WebP failure never fails the PNG row; it only means no offer.
+- [x] Verified against `next build` + `next start`. A JPEG/PDF-only batch never
+      loads the WebP encoder by construction (the worker only calls it from the PNG
+      branch); that was not separately proven at the network level, since
+      worker-initiated fetches are invisible to the page.
+
+**Done when:** a PNG that WebP shrinks by more than 10% shows the nudge, Convert swaps
+the download for the WebP, and PNGs below the threshold, skipped PNGs, JPEGs and PDFs
+show nothing.
+
+---
+
+### Sprint 2.4 — Format Conversion
+
+**Tasks**
+
+- [ ] Output format: `Keep original | JPEG | WebP | PNG` (AVIF unscheduled).
 - [ ] **Smart mode** (optional toggle): encode to several candidates, keep the smallest.
       Costs CPU, wins bytes — make the tradeoff explicit in the UI.
 - [ ] **Transparency guard.** PNG-with-alpha → JPEG silently flattens onto black. Detect
@@ -158,7 +182,7 @@ default quality — and dropping only JPEG/PNG files still never loads it.
 - [ ] Filename handling when the output extension changes on conversion, and dedupe when
       two differently-named originals would collide after conversion.
 
-**Done when:** a phone JPEG converts to AVIF at roughly half the size with correct
+**Done when:** a phone JPEG converts to WebP at roughly half the size with correct
 orientation, and an alpha PNG cannot be silently flattened to JPEG.
 
 ---
@@ -240,15 +264,16 @@ involved, and **`3.1.0` is tagged and released.**
 | — | Codec stack | **Settled** — hybrid: `@jsquash/*` (JPEG/WebP) + vendored pngquant (PNG), AVIF stubbed (Sprint 1.2) |
 | — | Batch delivery | **Settled, cancelled ZIP** — `downloadAll()` via directory picker or staggered fallback is permanent (Sprint 1.4) |
 | — | Save boundary | **Settled** — `lib/save/` behind a `Saver` interface, web today, Tauri in 3.3 (Sprint 1.4) |
-| 2.2 | AVIF default quality, Smart-mode default on/off | Open — needs real AVIF encode times once the Turbopack stall is fixed |
+| 2.4 | Smart-mode default on/off | Open |
+| — | AVIF | **Deferred, unscheduled** — removed from Sprint 2.2; blocked on the Turbopack build stall |
 | 3.1 | Precache all codecs vs fetch on demand | Open — sets PWA install weight |
 | 3.2 | Static export vs Hostinger's Node runtime | Open — depends on what 3.1's service worker needs |
 | 3.2 | Ship PDF Route A, or escalate to AGPL Route B | Open — governs any future hosting or commercialisation beyond personal use |
 
 ## Known risks
 
-- **AVIF encode time** on large batches may be bad enough to want a warning or a
-  worker-count cap. Measure once 2.2 unblocks it.
+- **AVIF encode time** (deferred with AVIF) may want a warning or a worker-count cap
+  if AVIF is ever picked up.
 - **Browser memory ceiling** is the real constraint on batch size. Decoded `ImageData` is
   ~4 bytes per pixel — a 50 MP photo is 200 MB uncompressed before any encoding.
 - **PDF Route A coverage** may disappoint on text-heavy or `FlateDecode`-image PDFs.

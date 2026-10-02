@@ -90,8 +90,8 @@ accident to be tidied up:
   visible radio to switch to lossless. That is what makes the repo GPL.
 - **AVIF is stubbed**, `available: false`. `@jsquash/avif` never completes
   `next build`. The capability table keeps its shape and `encoders.ts` carries the
-  restore path, so Sprint 2.2 flips one flag — after fixing the build, not instead
-  of it.
+  restore path, so AVIF (unscheduled since Sprint 2.2) flips one flag — after fixing
+  the build, not instead of it.
 
 Nothing above `lib/codecs/` may know any of this. The UI reads availability from
 the capability descriptor rather than a hardcoded list, so a format arriving or

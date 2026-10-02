@@ -42,6 +42,8 @@ export interface CompressResult {
     pdfNote?: "signed" | "flatten-not-smaller" | "flatten-failed";
     /** Lossy PNG only: what the encode measured, including whether it was skipped. */
     png?: PngQualityReport;
+    /** PNG only: a WebP of the same pixels, present only when it beats the PNG result enough to offer. */
+    webp?: { bytes: Uint8Array; savedRatio: number };
 }
 
 /**
@@ -131,6 +133,7 @@ export class CodecPool {
                     pageCount: msg.pageCount,
                     pdfNote: msg.pdfNote,
                     png: msg.png,
+                    webp: msg.webp && { bytes: new Uint8Array(msg.webp.bytes), savedRatio: msg.webp.savedRatio },
                 });
             } else {
                 waiting.reject(new Error(msg.error));
