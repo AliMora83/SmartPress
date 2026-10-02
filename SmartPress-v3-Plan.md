@@ -128,7 +128,8 @@ Lossy PNG replaces the 0–10 slider with three presets mapped to pngquant
 `min`–`max` quality ranges: **Min 60–80, Medium 40–60, Max 15–40** (default Medium).
 The vendored wasm exposes only `max`, so `min` is enforced in JS by measuring the
 output (`lib/codecs/pngQuality.ts`); a file below its preset's minimum is **skipped**
-and the original kept. The slider stays for JPEG, PDF images and lossless-PNG effort.
+and the original kept. (Superseded: the slider was removed afterwards and the
+presets now drive JPEG and PDF images too — see `AI-Logs.md`.)
 Measured on P1–P4 in `AI-Logs.md`. The emulation is approximate — exact semantics
 need a wasm rebuilt with min/max exposed.
 
@@ -146,7 +147,7 @@ the matching quality tier and, if it beats the PNG result by more than 10%, offe
 
 **Tasks**
 
-- [x] Tier mapping: each PNG preset → a WebP quality (`WEBP_SCALE_FOR_PNG_PRESET` in
+- [x] Tier mapping: each PNG preset → a WebP quality (`PRESET_SCALE` in
       `quality.ts`), with the sweep recorded in `AI-Logs.md`.
 - [x] Worker computes the WebP alternative after a PNG result that cleared its
       preset minimum. Not for skipped files, lossless PNG, JPEG, or PDF.
@@ -258,7 +259,7 @@ involved, and **`3.1.0` is tagged and released.**
 | Sprint | Decision | Status |
 |---|---|---|
 | — | Quality scale | **Settled** — abstract 0–10, higher better, default 7, per-codec curves |
-| — | Settings panel shape | **Settled** — Option A, swapping primary control |
+| — | Settings panel shape | **Settled, revised** — was Option A (one swapping slider); now one Min/Medium/Max preset for all formats, no slider |
 | — | PNG default mode | **Settled** — lossy palette, with a visible radio to switch (Sprint 1.3) |
 | — | Decode strategy | **Settled** — native decode, wasm encode only |
 | — | Codec stack | **Settled** — hybrid: `@jsquash/*` (JPEG/WebP) + vendored pngquant (PNG), AVIF stubbed (Sprint 1.2) |

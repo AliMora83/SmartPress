@@ -5,6 +5,39 @@
 
 ---
 
+## 2026-10-02 | Unified presets — slider removed | Claude (Sonnet 5.5)
+
+The 0–10 quality slider, its state and its persistence are gone. One
+**Min / Medium / Max** preset (default Medium) now drives every format:
+
+| Preset | 0–10 scale | JPEG / PDF images (native) | WebP (native) | Lossy PNG (pngquant) |
+|---|---|---|---|---|
+| Min | 8 | 82 | 83 | 60–80 |
+| Medium | 6 | 71 | 71 | 40–60 |
+| Max | 4 | 63 | 59 | 15–40 |
+
+`PRESET_SCALE` (was `WEBP_SCALE_FOR_PNG_PRESET`) is the single mapping, shared
+with the WebP nudge; `PngPreset` became `Preset`. The 0–10 scale and its
+calibrated curves are unchanged and still reachable at `/bench`.
+
+**Behaviour changes to know about**
+- **JPEG default moves from native 75 to 71.** The old default was scale 7;
+  Medium is 6. Min (82) is the closest to the old behaviour with more quality.
+- **Lossless PNG effort is now fixed** (`LOSSLESS_EFFORT = 4`, what the old default
+  resolved to). The slider used to buy effort there; the presets are quality
+  tiers and mapping "Min" to a different effort made little sense. `effortLevel`
+  was removed with its only caller.
+- **Settings key bumped to `smartpress:settings:v3`** and the v2 key is deleted on
+  first load, per the "bump rather than migrate" rule. Users' saved preset, PNG
+  mode and text-selectable choice reset to defaults once.
+
+Verified against `next build` + `next start`: no range inputs in the DOM; A-large
+JPEG Min/Medium/Max → 181.43 / 116.41 / 94.44 KB; SYN-scanned-style.pdf →
+46.07 / 32.85 / 27.91 KB; P4.png at Max 11.54 KB (matches the Sprint 2.2 table);
+preset persists across reload; no console errors.
+
+---
+
 ## 2026-10-02 | Sprint 2.3 — WebP nudge | Claude (Sonnet 5.5)
 
 After a **lossy PNG** compresses, the worker also encodes the same pixels as WebP

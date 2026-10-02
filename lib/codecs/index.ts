@@ -8,11 +8,11 @@
  */
 export { decode, toPlain } from "./decode";
 export { CAPABILITIES, FORMATS, ALL_FORMATS, capabilityOf } from "./capabilities";
-export { DEFAULT_QUALITY, DEFAULT_PNG_MODE, DEFAULT_PNG_PRESET, PNG_PRESETS, nativeQuality, effortLevel } from "./quality";
+export { DEFAULT_QUALITY, DEFAULT_PNG_MODE, DEFAULT_PRESET, PNG_PRESETS, PRESET_SCALE, nativeQuality } from "./quality";
 export { loadWasm, clearWasmCache } from "./loader";
 export type {
     Format, CodecCapability, ControlKind, EncodeOptions, EncodeResult, ImageDataLike, PngMode,
-    PngPreset, PngQualityReport,
+    Preset, PngQualityReport,
 } from "./types";
 
 import { getEncoder } from "./encoders";

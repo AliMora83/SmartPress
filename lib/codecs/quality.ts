@@ -1,11 +1,13 @@
-import type { EncodeOptions, Format, PngMode, PngPreset } from "./types";
+import type { EncodeOptions, Format, PngMode, Preset } from "./types";
 
 /**
- * The universal control is 0-10, higher is better, default 7.
+ * The internal quality scale is 0-10, higher is better, default 7. Users reach
+ * it through the Min/Medium/Max presets (`PRESET_SCALE`); /bench drives it
+ * directly.
  *
  * Each codec maps that scale onto its own native range, concentrated in the
  * band where that codec is actually useful. A linear 0-100 mapping wastes most
- * of the slider below usable quality -- MozJPEG at 20 and AVIF at 20 are both
+ * of the scale below usable quality -- MozJPEG at 20 and AVIF at 20 are both
  * unusable, so no step should land there.
  *
  * The consequence is intended: MozJPEG's 7 and AVIF's 7 are very different
@@ -25,29 +27,29 @@ export const DEFAULT_PNG_MODE: PngMode = "lossy";
 /**
  * Lossy PNG presets as pngquant `--quality min-max` ranges. They replace the
  * calibrated 0-10 curve (`PNG_ANCHORS`) on the lossy PNG path only; JPEG, WebP
- * and lossless-PNG effort still use the scale.
+ * and PDF images use the scale via `PRESET_SCALE`.
  *
  * `max` is what the quantizer aims for (it stops adding palette entries once
  * reached). `min` is the floor: if the best 256-colour result is below it, the
  * file is skipped rather than shipped looking worse than the user asked for.
  */
-export const PNG_PRESETS: Record<PngPreset, { min: number; max: number }> = {
+export const PNG_PRESETS: Record<Preset, { min: number; max: number }> = {
     min: { min: 60, max: 80 },
     medium: { min: 40, max: 60 },
     max: { min: 15, max: 40 },
 };
 
-export const DEFAULT_PNG_PRESET: PngPreset = "medium";
+export const DEFAULT_PRESET: Preset = "medium";
 
 /**
- * The WebP quality tier that stands in for each PNG preset when the WebP nudge
- * compares them, on the 0-10 scale (so it goes through `webpQuality`, 35-95):
- * Min 8 -> 83, Medium 6 -> 71, Max 4 -> 59. Chosen to keep the ordering and
- * roughly match each preset's intent, not measured for perceptual equivalence --
- * the two codecs degrade differently and no metric here compares them. The
- * sweep that justified these is in AI-Logs.md (Sprint 2.3).
+ * Each preset on the 0-10 scale, which every non-PNG-lossy path then runs
+ * through its own curve: JPEG (and PDF images, which use the JPEG path) Min 82 /
+ * Medium 71 / Max 63; WebP Min 83 / Medium 71 / Max 59, which is also the tier
+ * the WebP nudge compares against. Chosen to keep the ordering and roughly
+ * match each preset's intent, not measured for perceptual equivalence -- the
+ * codecs degrade differently and no metric here compares them.
  */
-export const WEBP_SCALE_FOR_PNG_PRESET: Record<PngPreset, number> = {
+export const PRESET_SCALE: Record<Preset, number> = {
     min: 8,
     medium: 6,
     max: 4,
@@ -155,16 +157,6 @@ export function avifQuality(scale: number): number {
     return band(scale, 25, 85);
 }
 
-/**
- * Effort, for a codec with no quality axis. Lossless PNG uses it: there is no
- * quality to trade, so the same control buys compression effort instead and the
- * slider never goes dead. oxipng levels run 0-6; below 2 is barely worth the
- * call and 6 is minutes on a large image, so the useful band is 1-5.
- */
-export function effortLevel(scale: number, lo = 1, hi = 5): number {
-    return band(scale, lo, hi);
-}
-
 export function nativeQuality(format: Format, scale: number): number {
     switch (format) {
         case "jpeg": return jpegQuality(scale);
@@ -190,8 +182,14 @@ export function resolveNative(format: Format, options: EncodeOptions = {}): numb
     return nativeQuality(format, options.quality ?? DEFAULT_QUALITY);
 }
 
-/** Lossless PNG spends the scale on effort, not quality. Same seam applies. */
+/**
+ * Lossless PNG has no quality to trade, and the presets don't apply to it, so
+ * its oxipng effort is fixed. oxipng levels run 0-6; below 2 is barely worth
+ * the call and 6 is minutes on a large image. 4 is what the old default
+ * slider position (7) resolved to.
+ */
+export const LOSSLESS_EFFORT = 4;
+
 export function resolveEffort(options: EncodeOptions = {}): number {
-    if (options.nativeOverride !== undefined) return options.nativeOverride;
-    return effortLevel(options.quality ?? DEFAULT_QUALITY);
+    return options.nativeOverride ?? LOSSLESS_EFFORT;
 }

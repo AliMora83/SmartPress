@@ -9,9 +9,9 @@ import { get, set, del } from "idb-keyval";
 import { isWorthKeeping } from "@/lib/compression";
 import { getPool, isCancelled, type Stage } from "@/lib/codecs/pool";
 import {
-    CAPABILITIES, DEFAULT_QUALITY, DEFAULT_PNG_MODE, DEFAULT_PNG_PRESET, PNG_PRESETS, formatFromMime,
+    CAPABILITIES, DEFAULT_PNG_MODE, DEFAULT_PRESET, PNG_PRESETS, PRESET_SCALE, formatFromMime,
 } from "@/lib/codecs";
-import type { Format, PngMode, PngPreset } from "@/lib/codecs";
+import type { Format, PngMode, Preset } from "@/lib/codecs";
 import { appError, classify, MAX_INPUT_BYTES, type AppError } from "@/lib/errors";
 import { webSaver } from "@/lib/save/web";
 import type { SaveAllResult, SaveItem } from "@/lib/save/types";
@@ -62,7 +62,7 @@ const ACCEPTED_LABEL = ACCEPTED_FORMATS
  * The key is versioned. Bumping it drops v1's stored file items outright rather
  * than half-migrating them, so a stale queue cannot come back.
  */
-const SETTINGS_KEY = "smartpress:settings:v2";
+const SETTINGS_KEY = "smartpress:settings:v3";
 /**
  * v1 keys, deleted on first load rather than migrated.
  *
@@ -71,21 +71,23 @@ const SETTINGS_KEY = "smartpress:settings:v2";
  * in particular is a dead key from the FFmpeg era, and deleting this line would
  * resurrect it in the stores of everyone who ran that build.
  */
-const LEGACY_KEYS = ["smartpress_files", "smartpress_image_quality", "smartpress_video_crf"];
+const LEGACY_KEYS = [
+    "smartpress_files", "smartpress_image_quality", "smartpress_video_crf",
+    // v2 stored a 0-10 `quality` and a PNG-only `pngPreset`; v3 has one `preset`.
+    "smartpress:settings:v2",
+];
 
 interface Settings {
-    /** The abstract 0-10 control. Curves live in lib/codecs/quality.ts. */
-    quality: number;
+    /** The one compression control. Mapping lives in lib/codecs/quality.ts. */
+    preset: Preset;
+    /** PNG only. Lossless ignores the preset. */
     pngMode: PngMode;
-    /** Lossy PNG only. Replaces the 0-10 scale on that path. */
-    pngPreset: PngPreset;
     /** PDF only. On (default) keeps levels 1-2; off allows level 3 flatten. */
     keepTextSelectable: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
-    quality: DEFAULT_QUALITY, pngMode: DEFAULT_PNG_MODE, pngPreset: DEFAULT_PNG_PRESET,
-    keepTextSelectable: true,
+    preset: DEFAULT_PRESET, pngMode: DEFAULT_PNG_MODE, keepTextSelectable: true,
 };
 
 // --- Types ---
@@ -123,7 +125,7 @@ interface FileItem {
     convertedTo?: "webp";
 }
 
-const PNG_PRESET_LABEL: Record<PngPreset, string> = { min: "Min", medium: "Medium", max: "Max" };
+const PRESET_LABEL: Record<Preset, string> = { min: "Min", medium: "Medium", max: "Max" };
 
 const STATUS_CONFIG: Record<FileStatus, { label: string; color: string; icon: typeof Clock }> = {
     pending: { label: "Ready", color: "#6b7280", icon: Clock },
@@ -213,10 +215,9 @@ export default function Compressor() {
                 const stored = await get<Partial<Settings>>(SETTINGS_KEY);
                 if (stored) {
                     setSettings({
-                        quality: typeof stored.quality === "number" ? stored.quality : DEFAULT_QUALITY,
+                        preset: stored.preset && stored.preset in PRESET_SCALE
+                            ? stored.preset : DEFAULT_PRESET,
                         pngMode: stored.pngMode === "lossless" ? "lossless" : DEFAULT_PNG_MODE,
-                        pngPreset: stored.pngPreset && stored.pngPreset in PNG_PRESETS
-                            ? stored.pngPreset : DEFAULT_PNG_PRESET,
                         keepTextSelectable: typeof stored.keepTextSelectable === "boolean"
                             ? stored.keepTextSelectable : true,
                     });
@@ -340,9 +341,9 @@ export default function Compressor() {
                 file: item.file,
                 format,
                 options: {
-                    quality: settingsRef.current.quality,
+                    quality: PRESET_SCALE[settingsRef.current.preset],
                     pngMode: settingsRef.current.pngMode,
-                    pngPreset: settingsRef.current.pngPreset,
+                    pngPreset: settingsRef.current.preset,
                     keepTextSelectable: settingsRef.current.keepTextSelectable,
                 },
                 onProgress: (progress, stage) => setFiles(prev => prev.map(f =>
@@ -599,11 +600,6 @@ export default function Compressor() {
     const anyPending = files.some(f => f.status === "pending");
     const anyDone = files.some(f => f.status === "done" && f.resultBlob);
     const anyPdf = files.some(f => f.format === "pdf");
-    // The 0-10 slider still drives JPEG, PDF images and lossless-PNG effort.
-    // Lossy PNG uses the presets instead, so the slider only shows when
-    // something in the queue (or the lossless mode) actually reads it.
-    const anyNonPng = files.some(f => f.format && f.format !== "png");
-    const showSlider = anyNonPng || settings.pngMode === "lossless";
 
     return (
         <div className={`w-full h-full ${files.length === 0 ? 'min-h-[50vh] md:min-h-screen flex items-center justify-center' : 'py-6 md:p-12'}`}>
@@ -649,40 +645,38 @@ export default function Compressor() {
                     {/* Settings Panel */}
                     {showSettings && (
                         <div className="bg-gray-50 rounded-xl p-6 border border-gray-100 space-y-6">
-                            {/*
-                              One universal control, per the settled settings shape. It
-                              means quality on every lossy path and effort on lossless
-                              PNG, so it is never dead and never applies to nothing.
-                            */}
-                            {showSlider && (
-                            <div className="space-y-3">
-                                <div className="flex justify-between items-center">
-                                    <label htmlFor="quality" className="text-sm font-bold text-gray-700">
-                                        Quality
-                                    </label>
-                                    <span className="text-sm font-mono font-bold text-gray-800 bg-white px-2 py-1 rounded border shadow-sm">
-                                        {settings.quality} / 10
-                                    </span>
+                            <fieldset className="space-y-2">
+                                <legend className="text-sm font-bold text-gray-700">Compression</legend>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {(Object.keys(PRESET_SCALE) as Preset[]).map(p => (
+                                        <label
+                                            key={p}
+                                            className={`cursor-pointer rounded-lg border px-3 py-2 text-center text-sm font-medium transition ${
+                                                settings.preset === p
+                                                    ? "border-blue-600 bg-blue-50 text-blue-700"
+                                                    : "border-gray-200 bg-white text-gray-700 hover:border-blue-300"}`}
+                                        >
+                                            <input
+                                                type="radio" name="preset" value={p}
+                                                checked={settings.preset === p}
+                                                onChange={() => setSettings(s => ({ ...s, preset: p }))}
+                                                className="sr-only"
+                                            />
+                                            {PRESET_LABEL[p]}
+                                        </label>
+                                    ))}
                                 </div>
-                                <input
-                                    id="quality"
-                                    type="range" min="0" max="10" step="1"
-                                    value={settings.quality}
-                                    onChange={(e) => setSettings(s => ({ ...s, quality: parseInt(e.target.value) }))}
-                                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                                />
-                                <div className="flex justify-between text-[11px] text-gray-700 font-bold tracking-wide">
-                                    <span>SMALLEST (0)</span>
-                                    <span>BEST (10)</span>
-                                </div>
-                                {settings.pngMode === "lossless" && (
+                                <p className="text-xs text-gray-500">
+                                    Min keeps the most quality, Max compresses hardest. Applies to JPEG,
+                                    images inside PDFs{settings.pngMode === "lossy" ? " and PNG" : ""}.
+                                </p>
+                                {settings.pngMode === "lossy" && (
                                     <p className="text-xs text-gray-500">
-                                        For lossless PNG this sets compression effort instead of
-                                        quality — there is no quality to trade away.
+                                        PNG palette quality {PNG_PRESETS[settings.preset].min}–{PNG_PRESETS[settings.preset].max}.
+                                        A PNG that can&rsquo;t reach the lower number is skipped and left as-is.
                                     </p>
                                 )}
-                            </div>
-                            )}
+                            </fieldset>
 
                             <div className="space-y-2">
                                 <span className="text-sm font-bold text-gray-700">PNG mode</span>
@@ -717,38 +711,6 @@ export default function Compressor() {
                                     </label>
                                 </div>
                             </div>
-
-                            {settings.pngMode === "lossy" && (
-                                <fieldset className="space-y-2">
-                                    <legend className="text-sm font-bold text-gray-700">PNG compression</legend>
-                                    <div className="grid grid-cols-3 gap-2">
-                                        {(Object.keys(PNG_PRESETS) as PngPreset[]).map(p => (
-                                            <label
-                                                key={p}
-                                                className={`cursor-pointer rounded-lg border px-3 py-2 text-center text-sm font-medium transition ${
-                                                    settings.pngPreset === p
-                                                        ? "border-blue-600 bg-blue-50 text-blue-700"
-                                                        : "border-gray-200 bg-white text-gray-700 hover:border-blue-300"}`}
-                                            >
-                                                <input
-                                                    type="radio" name="png-preset" value={p}
-                                                    checked={settings.pngPreset === p}
-                                                    onChange={() => setSettings(s => ({ ...s, pngPreset: p }))}
-                                                    className="sr-only"
-                                                />
-                                                {PNG_PRESET_LABEL[p]}
-                                                <span className="block text-[11px] font-normal text-gray-500">
-                                                    {PNG_PRESETS[p].min}–{PNG_PRESETS[p].max}
-                                                </span>
-                                            </label>
-                                        ))}
-                                    </div>
-                                    <p className="text-xs text-gray-500">
-                                        Min keeps the most quality, Max compresses hardest. A PNG that can&rsquo;t
-                                        reach the preset&rsquo;s lower number is skipped and left as-is.
-                                    </p>
-                                </fieldset>
-                            )}
 
                             {anyPdf && (
                                 <div className="space-y-2 border-t border-gray-200 pt-4">

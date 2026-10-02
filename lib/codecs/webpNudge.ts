@@ -1,7 +1,7 @@
 import { isWorthNudging } from "../compression";
 import { encode } from "./index";
-import { WEBP_SCALE_FOR_PNG_PRESET } from "./quality";
-import type { ImageDataLike, PngPreset } from "./types";
+import { PRESET_SCALE } from "./quality";
+import type { ImageDataLike, Preset } from "./types";
 
 export interface WebpAlternative {
     bytes: Uint8Array;
@@ -18,11 +18,11 @@ export interface WebpAlternative {
  */
 export async function webpAlternative(
     image: ImageDataLike,
-    preset: PngPreset,
+    preset: Preset,
     pngSize: number,
 ): Promise<WebpAlternative | null> {
     try {
-        const bytes = await encode(image, "webp", { quality: WEBP_SCALE_FOR_PNG_PRESET[preset] });
+        const bytes = await encode(image, "webp", { quality: PRESET_SCALE[preset] });
         if (!isWorthNudging(pngSize, bytes.byteLength)) return null;
         return { bytes, savedRatio: (pngSize - bytes.byteLength) / pngSize };
     } catch {
