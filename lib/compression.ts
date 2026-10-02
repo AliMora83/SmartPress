@@ -14,6 +14,20 @@
 export const MIN_GAIN_RATIO = 0.03;
 
 /**
+ * Minimum additional saving, relative to the PNG result, for the WebP nudge to
+ * appear. Lives here with the other keep/offer boundaries so the worker and the
+ * UI never restate it. Below 10% the extra click and a format change that some
+ * recipients can't open aren't worth it.
+ */
+export const WEBP_NUDGE_MIN_GAIN = 0.10;
+
+/** Whether a WebP of `webpSize` beats a PNG result of `pngSize` by enough to offer. */
+export function isWorthNudging(pngSize: number, webpSize: number): boolean {
+    if (pngSize <= 0) return false;
+    return (pngSize - webpSize) / pngSize > WEBP_NUDGE_MIN_GAIN;
+}
+
+/**
  * Whether an encode saved enough to be worth handing to the user in place of their
  * original. A non-positive original size is treated as not worth keeping rather than
  * dividing to Infinity or NaN.

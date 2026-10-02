@@ -5,6 +5,44 @@
 
 ---
 
+## 2026-10-02 | Sprint 2.3 — WebP nudge | Claude (Sonnet 5.5)
+
+After a **lossy PNG** compresses, the worker also encodes the same pixels as WebP
+(`@jsquash/webp`) at the matching tier. If it beats the PNG result by **more than
+10%** the row shows "WebP would save an additional X% — Convert?"; one click
+replaces the output with the WebP (`smartpress_<name>.webp`, `image/webp`). The
+threshold is `WEBP_NUDGE_MIN_GAIN` in `lib/compression.ts`. JPEG and PDF paths are
+untouched; skipped PNGs, lossless PNG and failed WebP encodes produce no offer (a
+WebP failure never fails the PNG row). The baseline is what the user would
+actually get, i.e. the original file when the PNG encode wasn't worth keeping.
+
+**Tier mapping is a choice, not a measurement.** Min/Medium/Max → WebP scale
+8/6/4 → native 83/71/59 (`WEBP_SCALE_FOR_PNG_PRESET`). The codecs degrade
+differently and nothing here compares them perceptually; the mapping preserves
+ordering and intent only.
+
+| Fixture | Min: PNG → WebP | Medium: PNG → WebP | Max: PNG → WebP |
+|---|---|---|---|
+| P1.png | 121,973 → 26,254 (−78.5%) | 105,536 → 17,648 (−83.3%) | 93,495 → 15,562 (−83.4%) |
+| P2.png | 73,033 → 17,708 (−75.8%) | 64,487 → 12,220 (−81.1%) | 58,450 → 10,776 (−81.6%) |
+| P3.png | 38,733 → 11,188 (−71.1%) | 34,570 → 7,916 (−77.1%) | 30,807 → 6,914 (−77.6%) |
+| P4.png | 14,637 → 5,102 (−65.1%) | 13,071 → 3,632 (−72.2%) | 11,819 → 3,152 (−73.3%) |
+
+These fixtures all clear the threshold by a wide margin, so the table shows the
+nudge firing everywhere; the below-threshold case is covered by a control below.
+
+Verified against `next build` + `next start`: P1 at Medium shows "an additional
+83%"; Convert removes the nudge, the download is `smartpress_P1.webp`, a real
+RIFF/WEBP file of 17,648 B (matches the sweep). Controls with no nudge: a 32×32
+solid-colour PNG (83 B result), a random-noise PNG (skipped), a JPEG, and P4 in
+lossless mode. No console errors. A flat two-tone 64×64 PNG landed at 11%, just
+over the line, and did show the nudge.
+
+Also this sprint: `SmartPress-v3-Plan.md` drops AVIF from Sprint 2.2 (now "PNG
+presets"), adds this sprint, and moves Format Conversion to 2.4 without AVIF.
+
+---
+
 ## 2026-10-02 | Sprint 2.2 — PNG presets | Claude (Sonnet 5.5)
 
 Lossy PNG now has three presets instead of the 0-10 slider: **Min 60-80, Medium

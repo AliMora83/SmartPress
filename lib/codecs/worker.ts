@@ -7,7 +7,9 @@
  * cheaper than transferring a 16 MB pixel buffer each way.
  */
 import { decode, toPlain } from "./decode";
+import { isWorthKeeping } from "../compression";
 import { encodeDetailed } from "./index";
+import { webpAlternative } from "./webpNudge";
 import type { EncodeOptions, Format, PngQualityReport } from "./types";
 
 export type WorkerRequest = {
@@ -24,6 +26,7 @@ export type WorkerResponse =
         id: string; type: "done"; bytes: ArrayBuffer; byteLength: number; decodeMs: number; encodeMs: number;
         pageCount?: number; pdfNote?: "signed" | "flatten-not-smaller" | "flatten-failed";
         png?: PngQualityReport;
+        webp?: { bytes: ArrayBuffer; savedRatio: number };
     }
     | { id: string; type: "error"; error: string };
 
@@ -72,9 +75,28 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         const buf = out.buffer.slice(
             out.byteOffset, out.byteOffset + out.byteLength,
         ) as ArrayBuffer;
+        const transfer: Transferable[] = [buf];
+
+        // WebP nudge: PNG only, and only for a lossy result that cleared its
+        // preset's minimum -- a skipped file has no result to compare against,
+        // and lossless has no quality tier to match. The baseline is what the
+        // user will actually get, which is the original when the PNG encode
+        // wasn't worth keeping.
+        let webp: { bytes: ArrayBuffer; savedRatio: number } | undefined;
+        if (format === "png" && png && !png.skipped) {
+            const baseline = isWorthKeeping(file.size, out.byteLength) ? out.byteLength : file.size;
+            const alt = await webpAlternative(toPlain(image), png.preset, baseline);
+            if (alt) {
+                const wbuf = alt.bytes.buffer.slice(
+                    alt.bytes.byteOffset, alt.bytes.byteOffset + alt.bytes.byteLength,
+                ) as ArrayBuffer;
+                webp = { bytes: wbuf, savedRatio: alt.savedRatio };
+                transfer.push(wbuf);
+            }
+        }
         post(
-            { id, type: "done", bytes: buf, byteLength: out.byteLength, decodeMs: t1 - t0, encodeMs: t2 - t1, png },
-            [buf],
+            { id, type: "done", bytes: buf, byteLength: out.byteLength, decodeMs: t1 - t0, encodeMs: t2 - t1, png, webp },
+            transfer,
         );
     } catch (err) {
         post({ id, type: "error", error: err instanceof Error ? `${err.name}: ${err.message}` : String(err) });
