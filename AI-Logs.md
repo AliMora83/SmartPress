@@ -5,6 +5,73 @@
 
 ---
 
+## 2026-10-03 | Sprint 3.1 — UI redesign | Claude (Sonnet 5.5)
+
+The interface is rebuilt to `docs/design-system/` (README, `tokens.json`, four
+component specs), **dark only**. UI only: nothing under `lib/codecs/` or the
+compression/queue/settings logic changed.
+
+**What shipped**
+- **Tokens** mirrored in `app/globals.css`: raw values as CSS variables, mapped into
+  Tailwind v4 via `@theme` (so `bg-surface`, `border-control-border`,
+  `text-text-muted`, `rounded-lg`, `text-label` … are real utilities). No light theme,
+  no `prefers-color-scheme` anywhere (verified: zero such rules in the built CSS).
+- **Geist + Geist Mono** via `next/font/google` (self-hosted at build, nothing fetched
+  at runtime; `NOTICE` has the OFL entry). Mono on every number and section label.
+- **Layout:** header (wordmark, version tag, Clear list, Add files); main column (drop
+  strip that accepts files **and folders**, column headers, rows); 320px settings
+  panel (presets, PNG mode, Keep PDF text selectable, Save to, Start pinned bottom);
+  status bar (batch totals, notices). ~1120×740 window from `lg` up; below that the
+  page flows and scrolls.
+- **Components** in `components/ui/`: `Button` (primary/secondary/quiet), `PresetSelector`,
+  `FileRow` (done, nudge, skipped, processing, queued, plus unchanged/error),
+  `Wordmark` (chevron mark + lowercase smartpress). Mascot removed.
+- Clickable controls use `control-border`; accent appears only on Start, the selected
+  preset, savings, progress and focus rings (audited from computed styles: the only
+  accent users are those, plus Convert, which the spec makes primary).
+- `/licenses` and its markdown renderer restyled to the tokens. `/bench` (a dev tool,
+  inline-styled) is untouched and simply inherits the dark body.
+
+**Where the web build departs from the README, and why** (decided with the owner)
+- **Save to.** "Same as source" is shown disabled ("Desktop app only"): a page cannot
+  write beside the original. "Choose folder" uses `showDirectoryPicker`; when a folder
+  is chosen, finished files are written straight into it when a Start batch completes.
+  That needed one small addition to the save layer (`saveAll(items, { directory })`,
+  `lib/save/`); no codec code.
+- **Show in folder** is *not* rendered: a web page cannot open the OS file manager, and a
+  button that does nothing is worse than none. It arrives with the desktop build (3.3).
+  Until then the status bar offers a quiet **Save all** when no folder was chosen.
+- **Per-row save icon** (plus remove) added in a fifth `60px` column. The README row has
+  no download action, but without one a user with no chosen folder couldn't get a file
+  out, which breaks the always-on upload→compress→download flow.
+- **Processing** shows elapsed seconds, not a percentage. The encoders have no progress
+  callback, so the percentage is stage-based (5/25/100) and would freeze at 25% and read
+  as hung; the bar is the existing indeterminate sweep for the same reason.
+- Thumbnails and their object-URL bookkeeping are gone (no design for them).
+- Panel hint copy is mine (the spec only says "one small line describing the preset").
+
+**Verified against `next build` + `next start`:** 1) Geist and Geist Mono load
+(`document.fonts`) and resolve on body, numbers and labels. 2) Computed styles match the
+tokens: Start 48px/radius-lg/accent, Convert 30px/radius-sm, Add files raised +
+control-border, Clear list transparent + control-border, selected preset accent,
+rows `surface` + `line` + radius-lg with grid `222px 90px 90px 70px 60px`, drop strip
+dashed `line-strong` radius-xl. 3) Full flow at Medium: P2 −90% with a "WebP would
+save an additional 81%" strip; Convert → `WEBP` badge, 12 KB, saves as
+`smartpress_P2.webp`; noise PNG → Skipped (warn) with the README copy verbatim and
+Original = Result; scanned PDF −97%, "5 pages"; unsupported `.txt` → typed Failed row;
+7 files with a 4-worker pool → rows 5–7 queued (muted, em dashes), status "Compressing
+7 of 7", Start disabled while nothing is pending. 4) The folder walker
+(`lib/dropEntries.ts`) passes a mock test: recursion, batched `readEntries`, filtering
+inside folders only, loose unsupported files kept. **Not verified:** a real folder drop
+and the choose-folder write path (a headless pane can't synthesise directory entries or
+the picker); both need a manual pass in Chromium.
+
+A bug caught on the way: `@theme inline` does not emit `--font-sans`/`--font-mono`, so
+the first build silently fell back to the system font. Fixed by naming the next/font
+variables directly in the base rules.
+
+---
+
 ## 2026-10-02 | Unified presets — slider removed | Claude (Sonnet 5.5)
 
 The 0–10 quality slider, its state and its persistence are gone. One

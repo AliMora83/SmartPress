@@ -201,9 +201,11 @@ the settings/queue logic may assume a browser tab is the only place it runs.
 
 **Tasks**
 
-- [ ] Dark UI redesign — the header link to `/licenses` moves here (`CLAUDE.md` already
-      notes this: `GPLv3 · Source · Notices` currently sits under the version line in the
-      left column; the redesign moves it into a header).
+- [x] Dark UI redesign, to `docs/design-system/` (tokens in Tailwind + CSS variables,
+      Geist / Geist Mono, header + main column + 320px settings panel + status bar,
+      Button / PresetSelector / FileRow / Wordmark, mascot removed). `GPLv3 · Source ·
+      Notices` moved to the status bar, still one click from every screen. See
+      `AI-Logs.md` (Sprint 3.1) for where the web build departs from the README.
 - [ ] PWA manifest + icons (Smart-Bot already exists at the right sizes) and a service
       worker precaching the app shell and vendored wasm, for the **web** offline case.
       Weigh the install cost — this is why mode-scoped loading landed in 2.1.

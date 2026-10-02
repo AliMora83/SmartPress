@@ -20,6 +20,17 @@ export interface SaveOneResult {
     error?: string;
 }
 
+/**
+ * Where saveAll() should write. Absent means "let the Saver decide" (the web
+ * Saver asks for a folder, or falls back to downloads). A directory the user
+ * already picked is passed in so a finished batch can land without a second
+ * prompt -- a folder picker needs a user gesture, and a batch finishes long
+ * after the click that started it.
+ */
+export interface SaveAllOptions {
+    directory?: FileSystemDirectoryHandle;
+}
+
 export interface SaveAllResult {
     /** Which strategy actually ran, so the UI can word the notice correctly. */
     mode: "directory" | "sequential" | "cancelled";
@@ -33,5 +44,5 @@ export interface SaveAllResult {
  */
 export interface Saver {
     saveOne(item: SaveItem): Promise<SaveOneResult>;
-    saveAll(items: SaveItem[]): Promise<SaveAllResult>;
+    saveAll(items: SaveItem[], options?: SaveAllOptions): Promise<SaveAllResult>;
 }

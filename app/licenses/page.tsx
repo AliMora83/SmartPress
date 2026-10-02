@@ -46,35 +46,35 @@ export default function LicensesPage() {
     const provenance = read("public", "wasm", "PROVENANCE.md");
 
     return (
-        <main className="min-h-screen bg-white px-6 py-12 md:px-12 md:py-16">
+        <main className="min-h-screen bg-ground px-6 py-12 md:px-12 md:py-16">
             <div className="mx-auto max-w-3xl">
                 <Link
                     href="/"
-                    className="text-sm font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900"
+                    className="text-sm font-medium text-text underline underline-offset-2 hover:text-text-muted"
                 >
                     ← Back to SmartPress
                 </Link>
 
-                <h1 className="mt-8 text-3xl font-extrabold tracking-tight text-slate-900 md:text-4xl">
+                <h1 className="mt-8 text-3xl font-extrabold tracking-tight text-text md:text-4xl">
                     Licences &amp; notices
                 </h1>
 
-                <p className="mt-4 text-sm leading-relaxed text-slate-600">
+                <p className="mt-4 text-sm leading-relaxed text-text-muted">
                     SmartPress {version} is free software: you can redistribute it and/or
                     modify it under the terms of the{" "}
-                    <strong className="font-semibold text-slate-900">
+                    <strong className="font-semibold text-text">
                         GNU General Public License, version 3 or later
                     </strong>
                     , as published by the Free Software Foundation. It is distributed in the
                     hope that it will be useful, but{" "}
-                    <strong className="font-semibold text-slate-900">without any warranty</strong>
+                    <strong className="font-semibold text-text">without any warranty</strong>
                     ; without even the implied warranty of merchantability or fitness for a
                     particular purpose.
                 </p>
 
-                <div className="mt-6 flex flex-wrap gap-x-6 gap-y-2 rounded-lg border border-slate-200 bg-slate-50 px-5 py-4 text-sm">
+                <div className="mt-6 flex flex-wrap gap-x-6 gap-y-2 rounded-lg border border-line bg-surface px-5 py-4 text-sm">
                     <a
-                        className="font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900"
+                        className="font-medium text-text underline underline-offset-2 hover:text-text-muted"
                         href="https://www.gnu.org/licenses/gpl-3.0.html"
                         rel="noopener noreferrer"
                         target="_blank"
@@ -82,7 +82,7 @@ export default function LicensesPage() {
                         Full GPL v3 text
                     </a>
                     <a
-                        className="font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900"
+                        className="font-medium text-text underline underline-offset-2 hover:text-text-muted"
                         href={SOURCE_URL}
                         rel="noopener noreferrer"
                         target="_blank"
@@ -90,14 +90,14 @@ export default function LicensesPage() {
                         Source code
                     </a>
                     <a
-                        className="font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900"
+                        className="font-medium text-text underline underline-offset-2 hover:text-text-muted"
                         href="#third-party"
                     >
                         Third-party notices
                     </a>
                 </div>
 
-                <p className="mt-4 text-sm leading-relaxed text-slate-600">
+                <p className="mt-4 text-sm leading-relaxed text-text-muted">
                     The GPL gives you the right to the complete corresponding source code for
                     this application, including the vendored WebAssembly codecs it serves to
                     your browser. It is published at the link above.
@@ -107,13 +107,13 @@ export default function LicensesPage() {
                     {renderMarkdown(notice)}
                 </section>
 
-                <hr className="my-12 border-slate-200" />
+                <hr className="my-12 border-line" />
 
                 <section id="provenance" className="scroll-mt-8">
                     {renderMarkdown(provenance)}
                 </section>
 
-                <footer className="mt-16 border-t border-slate-200 pt-6 text-xs text-slate-400">
+                <footer className="mt-16 border-t border-line pt-6 text-xs text-text-muted">
                     Generated from <code className="font-mono">NOTICE</code> and{" "}
                     <code className="font-mono">public/wasm/PROVENANCE.md</code> at build time.
                 </footer>

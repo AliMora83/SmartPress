@@ -31,12 +31,12 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
 
         if (token.startsWith("`")) {
             out.push(
-                <code key={key} className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[0.85em] text-slate-800">
+                <code key={key} className="rounded bg-raised px-1 py-0.5 font-mono text-[0.85em] text-text">
                     {token.slice(1, -1)}
                 </code>,
             );
         } else if (token.startsWith("**")) {
-            out.push(<strong key={key} className="font-semibold text-slate-900">{token.slice(2, -2)}</strong>);
+            out.push(<strong key={key} className="font-semibold text-text">{token.slice(2, -2)}</strong>);
         } else if (token.startsWith("[")) {
             const split = token.indexOf("](");
             const label = token.slice(1, split);
@@ -57,7 +57,7 @@ function Link({ href, children }: { href: string; children: ReactNode }) {
     return (
         <a
             href={href}
-            className="text-blue-700 underline underline-offset-2 hover:text-blue-900 break-words"
+            className="text-text underline underline-offset-2 hover:text-text-muted break-words"
             {...(external ? { rel: "noopener noreferrer", target: "_blank" } : {})}
         >
             {children}
@@ -90,7 +90,7 @@ export function renderMarkdown(src: string): ReactNode[] {
             while (i < lines.length && !lines[i].trimStart().startsWith("```")) body.push(lines[i++]);
             i++; // closing fence
             blocks.push(
-                <pre key={k()} className="my-4 overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs leading-relaxed text-slate-100">
+                <pre key={k()} className="my-4 overflow-x-auto rounded-lg bg-surface p-4 text-xs leading-relaxed text-text">
                     <code>{body.join("\n")}</code>
                 </pre>,
             );
@@ -99,7 +99,7 @@ export function renderMarkdown(src: string): ReactNode[] {
 
         // Horizontal rule.
         if (/^-{3,}$/.test(line.trim())) {
-            blocks.push(<hr key={k()} className="my-8 border-slate-200" />);
+            blocks.push(<hr key={k()} className="my-8 border-line" />);
             i++;
             continue;
         }
@@ -110,10 +110,10 @@ export function renderMarkdown(src: string): ReactNode[] {
             const depth = heading[1].length;
             const content = inline(heading[2], k());
             const cls = [
-                "mt-10 mb-4 text-2xl font-bold text-slate-900",
-                "mt-10 mb-3 text-xl font-bold text-slate-900",
-                "mt-8 mb-2 text-base font-bold text-slate-800",
-                "mt-6 mb-2 text-sm font-bold text-slate-800",
+                "mt-10 mb-4 text-2xl font-bold text-text",
+                "mt-10 mb-3 text-xl font-bold text-text",
+                "mt-8 mb-2 text-base font-bold text-text",
+                "mt-6 mb-2 text-sm font-bold text-text",
             ][depth - 1];
             const Tag = (["h2", "h3", "h4", "h5"] as const)[depth - 1];
             blocks.push(<Tag key={k()} className={cls}>{content}</Tag>);
@@ -129,12 +129,12 @@ export function renderMarkdown(src: string): ReactNode[] {
             const header = cells(rows[0]);
             const body = rows.slice(1).filter(r => !isSeparator(r)).map(cells);
             blocks.push(
-                <div key={k()} className="my-5 overflow-x-auto rounded-lg border border-slate-200">
+                <div key={k()} className="my-5 overflow-x-auto rounded-lg border border-line">
                     <table className="w-full border-collapse text-left text-sm">
-                        <thead className="bg-slate-50">
+                        <thead className="bg-surface">
                             <tr>
                                 {header.map((c, ci) => (
-                                    <th key={ci} className="border-b border-slate-200 px-3 py-2 font-semibold text-slate-700">
+                                    <th key={ci} className="border-b border-line px-3 py-2 font-semibold text-text">
                                         {inline(c, `${k()}-h${ci}`)}
                                     </th>
                                 ))}
@@ -142,9 +142,9 @@ export function renderMarkdown(src: string): ReactNode[] {
                         </thead>
                         <tbody>
                             {body.map((r, ri) => (
-                                <tr key={ri} className="align-top even:bg-slate-50/50">
+                                <tr key={ri} className="align-top even:bg-surface/50">
                                     {r.map((c, ci) => (
-                                        <td key={ci} className="border-b border-slate-100 px-3 py-2 text-slate-600">
+                                        <td key={ci} className="border-b border-line px-3 py-2 text-text-muted">
                                             {inline(c, `${k()}-r${ri}c${ci}`)}
                                         </td>
                                     ))}
@@ -170,7 +170,7 @@ export function renderMarkdown(src: string): ReactNode[] {
                 }
             }
             blocks.push(
-                <ul key={k()} className="my-4 list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-slate-600">
+                <ul key={k()} className="my-4 list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-text-muted">
                     {items.map((it, ii) => <li key={ii}>{inline(it, `${k()}-l${ii}`)}</li>)}
                 </ul>,
             );
@@ -185,7 +185,7 @@ export function renderMarkdown(src: string): ReactNode[] {
                 i++;
             }
             blocks.push(
-                <blockquote key={k()} className="my-4 border-l-4 border-slate-200 pl-4 text-sm italic leading-relaxed text-slate-500">
+                <blockquote key={k()} className="my-4 border-l-4 border-line pl-4 text-sm italic leading-relaxed text-text-muted">
                     {inline(body.join(" "), k())}
                 </blockquote>,
             );
@@ -203,7 +203,7 @@ export function renderMarkdown(src: string): ReactNode[] {
             i++;
         }
         blocks.push(
-            <p key={k()} className="my-4 text-sm leading-relaxed text-slate-600">
+            <p key={k()} className="my-4 text-sm leading-relaxed text-text-muted">
                 {inline(para.join(" "), k())}
             </p>,
         );

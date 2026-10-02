@@ -70,6 +70,18 @@ Apache-2.0 (Mozilla).
 
 ---
 
+## Fonts
+
+**Geist** and **Geist Mono** — <https://github.com/vercel/geist-font>
+Copyright (c) 2023 Vercel, in collaboration with basement.studio.
+SIL Open Font License 1.1 (<https://openfontlicense.org>).
+
+Fetched once at build time by `next/font/google` and served from this site's own
+origin; nothing is requested from Google at runtime. (Montserrat, used before
+Sprint 3.1, is no longer shipped.)
+
+---
+
 ## npm dependencies
 
 Codec packages from the [jSquash](https://github.com/jamsinclair/jSquash)
