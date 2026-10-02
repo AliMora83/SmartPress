@@ -7,8 +7,8 @@
  * cheaper than transferring a 16 MB pixel buffer each way.
  */
 import { decode, toPlain } from "./decode";
-import { encode } from "./index";
-import type { EncodeOptions, Format } from "./types";
+import { encodeDetailed } from "./index";
+import type { EncodeOptions, Format, PngQualityReport } from "./types";
 
 export type WorkerRequest = {
     id: string;
@@ -23,6 +23,7 @@ export type WorkerResponse =
     | {
         id: string; type: "done"; bytes: ArrayBuffer; byteLength: number; decodeMs: number; encodeMs: number;
         pageCount?: number; pdfNote?: "signed" | "flatten-not-smaller" | "flatten-failed";
+        png?: PngQualityReport;
     }
     | { id: string; type: "error"; error: string };
 
@@ -65,14 +66,14 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         // stage-based rather than continuous. Encoding is the long pole
         // (~4.9 s for a 1 MB PNG), so the UI shows it as in-flight from here.
         post({ id, type: "progress", stage: "encoding", progress: 25 });
-        const out = await encode(toPlain(image), format, options);
+        const { bytes: out, png } = await encodeDetailed(toPlain(image), format, options);
         const t2 = performance.now();
 
         const buf = out.buffer.slice(
             out.byteOffset, out.byteOffset + out.byteLength,
         ) as ArrayBuffer;
         post(
-            { id, type: "done", bytes: buf, byteLength: out.byteLength, decodeMs: t1 - t0, encodeMs: t2 - t1 },
+            { id, type: "done", bytes: buf, byteLength: out.byteLength, decodeMs: t1 - t0, encodeMs: t2 - t1, png },
             [buf],
         );
     } catch (err) {

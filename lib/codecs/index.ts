@@ -8,14 +8,15 @@
  */
 export { decode, toPlain } from "./decode";
 export { CAPABILITIES, FORMATS, ALL_FORMATS, capabilityOf } from "./capabilities";
-export { DEFAULT_QUALITY, DEFAULT_PNG_MODE, nativeQuality, effortLevel } from "./quality";
+export { DEFAULT_QUALITY, DEFAULT_PNG_MODE, DEFAULT_PNG_PRESET, PNG_PRESETS, nativeQuality, effortLevel } from "./quality";
 export { loadWasm, clearWasmCache } from "./loader";
 export type {
-    Format, CodecCapability, ControlKind, EncodeOptions, ImageDataLike, PngMode,
+    Format, CodecCapability, ControlKind, EncodeOptions, EncodeResult, ImageDataLike, PngMode,
+    PngPreset, PngQualityReport,
 } from "./types";
 
 import { getEncoder } from "./encoders";
-import type { EncodeOptions, Format, ImageDataLike } from "./types";
+import type { EncodeOptions, EncodeResult, Format, ImageDataLike } from "./types";
 
 /**
  * Encode already-decoded pixels to `format`.
@@ -23,13 +24,22 @@ import type { EncodeOptions, Format, ImageDataLike } from "./types";
  * `options.quality` is the abstract 0-10 scale; the per-codec curve in
  * quality.ts turns it into that encoder's native number.
  */
+export async function encodeDetailed(
+    data: ImageDataLike,
+    format: Format,
+    options: EncodeOptions = {},
+): Promise<EncodeResult> {
+    const encoder = await getEncoder(format);
+    return encoder(data, options);
+}
+
+/** Bytes only. Use `encodeDetailed` when the caller needs the PNG quality report. */
 export async function encode(
     data: ImageDataLike,
     format: Format,
     options: EncodeOptions = {},
 ): Promise<Uint8Array> {
-    const encoder = await getEncoder(format);
-    return encoder(data, options);
+    return (await encodeDetailed(data, format, options)).bytes;
 }
 
 /** Best-effort format guess from a file's MIME type. */

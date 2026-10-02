@@ -5,6 +5,42 @@
 
 ---
 
+## 2026-10-02 | Sprint 2.2 — PNG presets | Claude (Sonnet 5.5)
+
+Lossy PNG now has three presets instead of the 0-10 slider: **Min 60-80, Medium
+40-60, Max 15-40** (pngquant `min-max`; "Min" is the lightest touch). Default
+Medium. A file that can't reach its preset's minimum is **skipped** — original
+kept, own filename, row says why. The slider remains for JPEG, PDF images and
+lossless-PNG effort, and only renders when the queue needs it.
+
+**The vendored wasm cannot do min_quality.** `pngquant_bg.wasm`'s options struct
+has one `quality` field, which acts as imagequant's max; min is effectively 0 and
+`QualityTooLow` never fires (a 256×256 noise image at quality 10-100 returns a
+full 256-colour palette, no error). So the preset's max goes to the encoder and
+the min is **emulated in JS** (`lib/codecs/pngQuality.ts`): decode the output with
+the wasm's own `png_to_rgba`, compute imagequant's error metric against the
+source, convert with its `mse_to_quality`. Skip when below min.
+
+**Calibration caveat.** The port omits imagequant's per-pixel importance
+weighting, so measured error is 1.1-1.7× imagequant's budget on P1-P4 and
+0.4-0.7× on the icon fixtures. `MSE_SCALE = 1/1.75` biases toward never
+skipping a file the encoder was happy with; the cost is that some real skips are
+missed on image types the scale over-corrects. Exact semantics need a wasm
+rebuilt with min/max exposed (no Rust toolchain on this machine; not done).
+
+| Fixture | Original | Min (60-80) | Medium (40-60) | Max (15-40) |
+|---|---|---|---|---|
+| P1.png | 1,065,228 | 121,973 (−88.5%) | 105,536 (−90.1%) | 93,495 (−91.2%) |
+| P2.png | 629,412 | 73,033 (−88.4%) | 64,487 (−89.8%) | 58,450 (−90.7%) |
+| P3.png | 321,119 | 38,733 (−87.9%) | 34,570 (−89.2%) | 30,807 (−90.4%) |
+| P4.png | 115,568 | 14,637 (−87.3%) | 13,071 (−88.7%) | 11,819 (−89.8%) |
+
+Measured quality of each result met its preset min on all four. Verified against
+`next build` + `next start`: P1.png at Medium → 103.06 KB (−90%) in the UI,
+matching the table; a 256×256 random-noise PNG → skipped (15 < 40).
+
+---
+
 ## 2026-09-24 | Sprint 2.1 — PDF, Route A | Claude (Sonnet 5)
 
 PDF joins images as a first-class format: three compression levels behind the

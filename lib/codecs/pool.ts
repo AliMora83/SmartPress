@@ -1,4 +1,4 @@
-import type { EncodeOptions, Format } from "./types";
+import type { EncodeOptions, Format, PngQualityReport } from "./types";
 import type { WorkerRequest, WorkerResponse } from "./worker";
 
 /** Which half of the job a progress tick belongs to. Mirrors the worker. */
@@ -40,6 +40,8 @@ export interface CompressResult {
     /** PDF only. */
     pageCount?: number;
     pdfNote?: "signed" | "flatten-not-smaller" | "flatten-failed";
+    /** Lossy PNG only: what the encode measured, including whether it was skipped. */
+    png?: PngQualityReport;
 }
 
 /**
@@ -128,6 +130,7 @@ export class CodecPool {
                     encodeMs: msg.encodeMs,
                     pageCount: msg.pageCount,
                     pdfNote: msg.pdfNote,
+                    png: msg.png,
                 });
             } else {
                 waiting.reject(new Error(msg.error));

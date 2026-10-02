@@ -8,8 +8,10 @@ import {
 import { get, set, del } from "idb-keyval";
 import { isWorthKeeping } from "@/lib/compression";
 import { getPool, isCancelled, type Stage } from "@/lib/codecs/pool";
-import { CAPABILITIES, DEFAULT_QUALITY, DEFAULT_PNG_MODE, formatFromMime } from "@/lib/codecs";
-import type { Format, PngMode } from "@/lib/codecs";
+import {
+    CAPABILITIES, DEFAULT_QUALITY, DEFAULT_PNG_MODE, DEFAULT_PNG_PRESET, PNG_PRESETS, formatFromMime,
+} from "@/lib/codecs";
+import type { Format, PngMode, PngPreset } from "@/lib/codecs";
 import { appError, classify, MAX_INPUT_BYTES, type AppError } from "@/lib/errors";
 import { webSaver } from "@/lib/save/web";
 import type { SaveAllResult, SaveItem } from "@/lib/save/types";
@@ -75,12 +77,15 @@ interface Settings {
     /** The abstract 0-10 control. Curves live in lib/codecs/quality.ts. */
     quality: number;
     pngMode: PngMode;
+    /** Lossy PNG only. Replaces the 0-10 scale on that path. */
+    pngPreset: PngPreset;
     /** PDF only. On (default) keeps levels 1-2; off allows level 3 flatten. */
     keepTextSelectable: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
-    quality: DEFAULT_QUALITY, pngMode: DEFAULT_PNG_MODE, keepTextSelectable: true,
+    quality: DEFAULT_QUALITY, pngMode: DEFAULT_PNG_MODE, pngPreset: DEFAULT_PNG_PRESET,
+    keepTextSelectable: true,
 };
 
 // --- Types ---
@@ -110,7 +115,11 @@ interface FileItem {
     /** PDF only, set once compression completes. */
     pageCount?: number;
     pdfNote?: "signed" | "flatten-not-smaller" | "flatten-failed";
+    /** Lossy PNG only. Set when the encode landed below the preset's minimum quality; the original was kept. */
+    pngSkip?: { achieved: number; min: number };
 }
+
+const PNG_PRESET_LABEL: Record<PngPreset, string> = { min: "Min", medium: "Medium", max: "Max" };
 
 const STATUS_CONFIG: Record<FileStatus, { label: string; color: string; icon: typeof Clock }> = {
     pending: { label: "Ready", color: "#6b7280", icon: Clock },
@@ -200,6 +209,8 @@ export default function Compressor() {
                     setSettings({
                         quality: typeof stored.quality === "number" ? stored.quality : DEFAULT_QUALITY,
                         pngMode: stored.pngMode === "lossless" ? "lossless" : DEFAULT_PNG_MODE,
+                        pngPreset: stored.pngPreset && stored.pngPreset in PNG_PRESETS
+                            ? stored.pngPreset : DEFAULT_PNG_PRESET,
                         keepTextSelectable: typeof stored.keepTextSelectable === "boolean"
                             ? stored.keepTextSelectable : true,
                     });
@@ -313,7 +324,7 @@ export default function Compressor() {
             startedAt: Date.now(), error: undefined,
             resultBlob: undefined, newSize: undefined,
             alreadyOptimal: undefined, saved: undefined,
-            pageCount: undefined, pdfNote: undefined,
+            pageCount: undefined, pdfNote: undefined, pngSkip: undefined,
         } : f));
 
         try {
@@ -324,6 +335,7 @@ export default function Compressor() {
                 options: {
                     quality: settingsRef.current.quality,
                     pngMode: settingsRef.current.pngMode,
+                    pngPreset: settingsRef.current.pngPreset,
                     keepTextSelectable: settingsRef.current.keepTextSelectable,
                 },
                 onProgress: (progress, stage) => setFiles(prev => prev.map(f =>
@@ -336,7 +348,10 @@ export default function Compressor() {
             // (result.pdfNote === "signed") lands here too: pdf.ts hands back
             // the original bytes untouched, so the gain is zero by construction.
             const outBytes = result.bytes.byteLength;
-            const worthIt = isWorthKeeping(item.file.size, outBytes);
+            // A lossy PNG that landed below its preset's minimum is skipped:
+            // the same hand-back as "not worth it", with its own reason.
+            const skipped = result.png?.skipped === true;
+            const worthIt = !skipped && isWorthKeeping(item.file.size, outBytes);
             const output: Blob = worthIt
                 ? new Blob([result.bytes as unknown as BlobPart], { type: cap.mimeType })
                 : item.file;
@@ -350,6 +365,8 @@ export default function Compressor() {
                 alreadyOptimal: !worthIt,
                 pageCount: result.pageCount,
                 pdfNote: result.pdfNote,
+                pngSkip: skipped && result.png
+                    ? { achieved: result.png.achieved, min: result.png.min } : undefined,
             } : f));
         } catch (e) {
             // A cancelled row was removed or cleared; there is nothing left to
@@ -487,7 +504,9 @@ export default function Compressor() {
                             <span className="text-sm">
                                 {fileItem.pdfNote === "signed"
                                     ? "Signed PDF left unchanged, compressing would break the signature."
-                                    : "No size reduction — original kept"}
+                                    : fileItem.pngSkip
+                                        ? `Skipped — couldn’t reach the minimum quality for this preset (${fileItem.pngSkip.achieved} < ${fileItem.pngSkip.min}). Original kept.`
+                                        : "No size reduction — original kept"}
                             </span>
                             {pageBadge}
                         </div>
@@ -545,6 +564,11 @@ export default function Compressor() {
     const anyPending = files.some(f => f.status === "pending");
     const anyDone = files.some(f => f.status === "done" && f.resultBlob);
     const anyPdf = files.some(f => f.format === "pdf");
+    // The 0-10 slider still drives JPEG, PDF images and lossless-PNG effort.
+    // Lossy PNG uses the presets instead, so the slider only shows when
+    // something in the queue (or the lossless mode) actually reads it.
+    const anyNonPng = files.some(f => f.format && f.format !== "png");
+    const showSlider = anyNonPng || settings.pngMode === "lossless";
 
     return (
         <div className={`w-full h-full ${files.length === 0 ? 'min-h-[50vh] md:min-h-screen flex items-center justify-center' : 'py-6 md:p-12'}`}>
@@ -595,6 +619,7 @@ export default function Compressor() {
                               means quality on every lossy path and effort on lossless
                               PNG, so it is never dead and never applies to nothing.
                             */}
+                            {showSlider && (
                             <div className="space-y-3">
                                 <div className="flex justify-between items-center">
                                     <label htmlFor="quality" className="text-sm font-bold text-gray-700">
@@ -622,6 +647,7 @@ export default function Compressor() {
                                     </p>
                                 )}
                             </div>
+                            )}
 
                             <div className="space-y-2">
                                 <span className="text-sm font-bold text-gray-700">PNG mode</span>
@@ -656,6 +682,38 @@ export default function Compressor() {
                                     </label>
                                 </div>
                             </div>
+
+                            {settings.pngMode === "lossy" && (
+                                <fieldset className="space-y-2">
+                                    <legend className="text-sm font-bold text-gray-700">PNG compression</legend>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        {(Object.keys(PNG_PRESETS) as PngPreset[]).map(p => (
+                                            <label
+                                                key={p}
+                                                className={`cursor-pointer rounded-lg border px-3 py-2 text-center text-sm font-medium transition ${
+                                                    settings.pngPreset === p
+                                                        ? "border-blue-600 bg-blue-50 text-blue-700"
+                                                        : "border-gray-200 bg-white text-gray-700 hover:border-blue-300"}`}
+                                            >
+                                                <input
+                                                    type="radio" name="png-preset" value={p}
+                                                    checked={settings.pngPreset === p}
+                                                    onChange={() => setSettings(s => ({ ...s, pngPreset: p }))}
+                                                    className="sr-only"
+                                                />
+                                                {PNG_PRESET_LABEL[p]}
+                                                <span className="block text-[11px] font-normal text-gray-500">
+                                                    {PNG_PRESETS[p].min}–{PNG_PRESETS[p].max}
+                                                </span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                    <p className="text-xs text-gray-500">
+                                        Min keeps the most quality, Max compresses hardest. A PNG that can&rsquo;t
+                                        reach the preset&rsquo;s lower number is skipped and left as-is.
+                                    </p>
+                                </fieldset>
+                            )}
 
                             {anyPdf && (
                                 <div className="space-y-2 border-t border-gray-200 pt-4">
