@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -22,6 +22,12 @@ export const metadata: Metadata = {
   icons: {
     icon: "/favicon.ico",
   },
+  manifest: "/manifest.webmanifest",
+};
+
+// bg-ground from docs/design-system/tokens.json; matches the manifest.
+export const viewport: Viewport = {
+  themeColor: "#0C0E12",
 };
 
 export default function RootLayout({
