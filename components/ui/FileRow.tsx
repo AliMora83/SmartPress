@@ -16,7 +16,8 @@ export type FileRowStatus =
     | "done"
     | "skipped"      // original kept, with a reason that is the product working as intended
     | "unchanged"    // original kept because nothing to gain (not a skip)
-    | "error";
+    | "error"
+    | "unsupported"; // not a handled format: listed, never processed
 
 export interface FileRowProps {
     name: string;
@@ -80,10 +81,16 @@ export function FileRow(p: FileRowProps) {
                     <span className="truncate text-body" title={p.name}>{p.name}</span>
                 </div>
                 <span className="data-mono text-right text-text-muted">{formatSize(p.originalSize)}</span>
-                <span className={clsx("data-mono text-right", !showResult && "text-text-muted")}>
-                    {showResult && p.resultSize !== undefined ? formatSize(p.resultSize) : emDash}
-                </span>
-                <span className="data-mono text-right">{saved}</span>
+                {p.status === "unsupported" ? (
+                    <span className="data-mono col-span-2 text-right text-warn">Not supported</span>
+                ) : (
+                    <>
+                        <span className={clsx("data-mono text-right", !showResult && "text-text-muted")}>
+                            {showResult && p.resultSize !== undefined ? formatSize(p.resultSize) : emDash}
+                        </span>
+                        <span className="data-mono text-right">{saved}</span>
+                    </>
+                )}
                 <div className="flex justify-end gap-1">
                     {p.canSave && (
                         <button type="button" className={iconButton} onClick={p.onSave} aria-label={`Save ${p.name}`}>

@@ -52,7 +52,31 @@ import type { SaveAllResult, SaveItem } from "@/lib/save/types";
 const PHASE1_INPUT_FORMATS: Format[] = ["jpeg", "png", "pdf"];
 const ACCEPTED_FORMATS = PHASE1_INPUT_FORMATS.filter(f => CAPABILITIES[f].available !== false);
 const ACCEPTED_TYPES = ACCEPTED_FORMATS.map(f => CAPABILITIES[f].mimeType);
-const ACCEPT_ATTR = ACCEPTED_TYPES.join(",");
+/**
+ * A file is accepted only if its extension AND its MIME type are on the list, and
+ * they name the same format. Either alone is forgeable (a renamed MP4, or a file
+ * the OS reports with no MIME type), so both gates must pass.
+ */
+const EXTENSIONS_BY_FORMAT: Partial<Record<Format, string[]>> = {
+    jpeg: ["jpg", "jpeg"], png: ["png"], pdf: ["pdf"],
+};
+const ACCEPTED_EXTENSIONS = ACCEPTED_FORMATS.flatMap(f => EXTENSIONS_BY_FORMAT[f] ?? []);
+const ACCEPT_ATTR = [...ACCEPTED_EXTENSIONS.map(e => `.${e}`), ...ACCEPTED_TYPES].join(",");
+
+function isAcceptedFile(file: File): boolean {
+    const format = formatFromMime(file.type);
+    if (!format || !ACCEPTED_FORMATS.includes(format)) return false;
+    const dot = file.name.lastIndexOf(".");
+    const ext = dot < 0 ? "" : file.name.slice(dot + 1).toLowerCase();
+    return (EXTENSIONS_BY_FORMAT[format] ?? []).includes(ext);
+}
+
+/**
+ * Build target. "web" (the default) can't write next to the source file, so it
+ * offers Choose folder only. "desktop" (Tauri, Sprint 3.3) keeps "Same as source".
+ * Inlined at build time by Next, so the unused branch is dead code in the export.
+ */
+const IS_WEB = (process.env.NEXT_PUBLIC_TARGET ?? "web") !== "desktop";
 const ACCEPTED_LABEL = ACCEPTED_FORMATS
     .map(f => CAPABILITIES[f].extension.toUpperCase())
     .join(", ");
@@ -97,7 +121,9 @@ const DEFAULT_SETTINGS: Settings = {
 // --- Types ---
 
 /** Five states, matching the worker pool's lifecycle. */
-type FileStatus = "pending" | "queued" | "processing" | "done" | "error";
+type FileStatus = "pending" | "queued" | "processing" | "done" | "error"
+    /** Not a format SmartPress handles. Listed so the drop is visible, never processed. */
+    | "unsupported";
 
 interface FileItem {
     id: string;
@@ -225,12 +251,12 @@ export default function Compressor({ version }: { version: string }) {
 
     // --- Queue management ---
 
-    const handleFileSelect = useCallback((uploaded: ArrayLike<File> | null) => {
-        if (!uploaded?.length) return;
-        const added: FileItem[] = Array.from(uploaded).map(file => {
-            const format = formatFromMime(file.type);
-            const supported = !!format && ACCEPTED_FORMATS.includes(format);
-            const tooBig = file.size > MAX_INPUT_BYTES;
+    const handleFileSelect = useCallback((selected: ArrayLike<File> | null) => {
+        if (!selected?.length) return;
+        const added: FileItem[] = Array.from(selected).map(file => {
+            const supported = isAcceptedFile(file);
+            const format = supported ? formatFromMime(file.type) : null;
+            const tooBig = supported && file.size > MAX_INPUT_BYTES;
             const error = !supported
                 ? appError("UNSUPPORTED_FORMAT")
                 : tooBig ? appError("FILE_TOO_LARGE", formatSize(file.size)) : undefined;
@@ -239,8 +265,8 @@ export default function Compressor({ version }: { version: string }) {
                 // same millisecond used to collide and share a row.
                 id: crypto.randomUUID(),
                 file,
-                format: supported ? format : undefined,
-                status: error ? "error" : "pending",
+                format: format ?? undefined,
+                status: !supported ? "unsupported" : error ? "error" : "pending",
                 progress: 0,
                 error,
                 originalSize: file.size,
@@ -262,11 +288,7 @@ export default function Compressor({ version }: { version: string }) {
         setDragActive(false);
         // Drop events bypass the input's accept filter, so validate here too.
         // Folders are walked for their images and PDFs; see lib/dropEntries.ts.
-        const accepts = (f: File) => {
-            const fmt = formatFromMime(f.type);
-            return !!fmt && ACCEPTED_FORMATS.includes(fmt);
-        };
-        handleFileSelect(await filesFromDrop(e.dataTransfer, accepts));
+        handleFileSelect(await filesFromDrop(e.dataTransfer, isAcceptedFile));
     };
 
     const removeFile = useCallback((id: string) => {
@@ -478,6 +500,9 @@ export default function Compressor({ version }: { version: string }) {
 
     // --- Derived view state ---
 
+    // Unsupported rows stay in the list but are not part of the batch: they are
+    // never started and never counted in the footer.
+    const batchFiles = files.filter(f => f.status !== "unsupported");
     const anyPending = files.some(f => f.status === "pending");
     const doneRows = files.filter(f => f.status === "done" && f.resultBlob);
     const anyDone = doneRows.length > 0;
@@ -493,7 +518,9 @@ export default function Compressor({ version }: { version: string }) {
 
         let status: FileRowStatus = f.status;
         const notes: string[] = [];
-        if (f.status === "error") {
+        if (f.status === "unsupported") {
+            notes.push("Only JPG, PNG and PDF files can be compressed.");
+        } else if (f.status === "error") {
             notes.push(f.error?.message ?? "Compression failed.");
         } else if (f.status === "done") {
             if (f.alreadyOptimal) {
@@ -568,11 +595,11 @@ export default function Compressor({ version }: { version: string }) {
                     <Wordmark version={version} />
                     <div className="flex items-center gap-2">
                         <Button variant="quiet" onClick={clearAll} disabled={files.length === 0}>Clear list</Button>
-                        <Button variant="secondary" onClick={() => document.getElementById("file-upload")?.click()}>
+                        <Button variant="secondary" onClick={() => document.getElementById("file-input")?.click()}>
                             Add files
                         </Button>
                         <input
-                            id="file-upload"
+                            id="file-input"
                             type="file"
                             className="hidden"
                             accept={ACCEPT_ATTR}
@@ -597,11 +624,11 @@ export default function Compressor({ version }: { version: string }) {
                                 "flex flex-shrink-0 cursor-pointer items-center justify-between gap-4 rounded-xl border border-dashed px-5 py-4 transition-colors",
                                 dragActive ? "border-control-border bg-raised" : "border-line-strong hover:bg-surface",
                             )}
-                            onClick={() => document.getElementById("file-upload")?.click()}
+                            onClick={() => document.getElementById("file-input")?.click()}
                             onKeyDown={(e) => {
                                 if (e.key === "Enter" || e.key === " ") {
                                     e.preventDefault();
-                                    document.getElementById("file-upload")?.click();
+                                    document.getElementById("file-input")?.click();
                                 }
                             }}
                             onDragEnter={handleDrag}
@@ -679,11 +706,13 @@ export default function Compressor({ version }: { version: string }) {
                             <fieldset>
                                 <legend className="label-mono mb-3 text-text-muted">Save to</legend>
                                 <div className="flex flex-col gap-3">
-                                    <Choice
-                                        type="radio" name="save-to" checked={false} disabled
-                                        onChange={() => {}}
-                                        label="Same as source" hint="Desktop app only. A browser can't write next to the original."
-                                    />
+                                    {!IS_WEB && (
+                                        <Choice
+                                            type="radio" name="save-to" checked={false} disabled
+                                            onChange={() => {}}
+                                            label="Same as source" hint="Desktop app only. A browser can't write next to the original."
+                                        />
+                                    )}
                                     <Choice
                                         type="radio" name="save-to" checked readOnly
                                         onChange={() => {}}
@@ -726,14 +755,15 @@ export default function Compressor({ version }: { version: string }) {
                 <footer className="flex flex-shrink-0 items-center justify-between gap-4 border-t border-line px-6 py-2">
                     <p className="data-mono min-w-0 truncate text-text-muted">
                         {inFlight > 0
-                            ? `Compressing ${inFlight} of ${files.length}`
+                            ? `Compressing ${inFlight} of ${batchFiles.length}`
                             : anyDone
                                 ? <>
                                     {doneRows.length} done {"·"} {formatSize(totalOriginal)} {"→"} {formatSize(totalResult)}
                                     {totalResult < totalOriginal && <> <span className="text-accent">{formatSaved(totalOriginal, totalResult)}</span></>}
                                     {saveNotice && <> {"·"} {saveNotice}</>}
                                 </>
-                                : files.length ? `${files.length} ${files.length === 1 ? "file" : "files"} ready` : "No files"}
+                                : batchFiles.length ? `${batchFiles.length} ${batchFiles.length === 1 ? "file" : "files"} ready`
+                                : files.length ? "No supported files" : "No files"}
                     </p>
                     <div className="flex flex-shrink-0 items-center gap-4">
                         {anyDone && inFlight === 0 && !folder && (
