@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build",
+    "postbuild": "node scripts/prune-export.mjs && node scripts/check-export.mjs",
     "start": "next start",
     "lint": "eslint"
   },

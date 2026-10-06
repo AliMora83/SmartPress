@@ -5,6 +5,44 @@
 
 ---
 
+## 2026-10-06 | Sprint 3.2a follow-up — export hygiene | Claude (Sonnet 5.5)
+
+Same branch. The web export no longer ships fixtures, the bench route or the duplicate wasm.
+
+**What changed**
+- **/bench is dev-only.** `app/bench/page.tsx` → `page.dev.tsx`; `next.config.ts` (now a phase function)
+  adds `dev.tsx` to `pageExtensions` only under `next dev`. Production has no `/bench` route.
+  Verified: `next dev --webpack` serves `/bench/` (200, harness renders) and `/__fixtures/P1.png` (200);
+  the export returns 404 for both.
+- **`postbuild`** (`npm run build` runs it): `scripts/prune-export.mjs` deletes `out/__fixtures` and the
+  hashed `_next/static/media/*.wasm`; `scripts/check-export.mjs` then FAILS the build if `out/` has:
+  a `__fixtures` dir, anything named `bench*`/under a `bench` path, a `.png/.jpg/.jpeg/.pdf` outside
+  `_next/` other than the allowlist (`icon.png`, `Smart_icon.png`), or a `.wasm` outside `wasm/`.
+  Guard tested both ways (planted files → exit 1 listing each; clean → ok).
+- **Duplicate wasm: the hashed set is unused.** Checked against `npx serve out` request logs (worker
+  fetches don't show in page devtools): compressing a JPG, a PNG (which also runs the WebP nudge) and a PDF
+  requested only `/wasm/mozjpeg_enc.wasm`, `/wasm/pngquant_bg.wasm`, `/wasm/webp_enc_simd.wasm`. Code agrees:
+  `encoders.ts` passes each binary from `/wasm/` into `init(module)`; the hashed files are the @jsquash glue's
+  default `new URL()` fallback, which Turbopack emits but never reaches. Re-run with the hashed files
+  deleted: all formats still work. Not exercised: `webp_enc.wasm` (non-SIMD; this browser always picks SIMD).
+- `.gitignore` already has `/out/`.
+
+**Export:** 9.6 MB, 273 files (was 30 MB, 303). Routes: `/`, `/_not-found` (+`404.html`), `/licenses`, `/icon.png`.
+
+| .wasm file | Bytes |
+|---|---|
+| `wasm/pngquant_bg.wasm` | 349,781 |
+| `wasm/webp_enc_simd.wasm` | 345,584 |
+| `wasm/webp_enc.wasm` | 281,261 |
+| `wasm/mozjpeg_enc.wasm` | 251,524 |
+
+**Smoke test** (`npx serve out`, fixtures from `npx serve public/__fixtures --cors` since the export no longer
+carries them): JPG 180 KB → 63 KB (−65%); P1.png 1.02 MB → 103 KB (−90%); PDF 1.08 MB → 33 KB (−97%);
+MP4 "Not supported", not in "3 files ready" or the totals; Choose folder (picker stubbed with OPFS) wrote
+3 files; Choose folder is the only Save to option.
+
+---
+
 ## 2026-10-06 | Sprint 3.2a — Pre-deploy fixes + static export | Claude (Sonnet 5.5)
 
 Branch `sprint/3.2a-deploy-prep`. Version 3.0.0 (`package.json`, lockfile; the UI badge reads it).
