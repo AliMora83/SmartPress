@@ -683,7 +683,7 @@ export default function Compressor({ version }: { version: string }) {
                                     <Choice
                                         type="radio" name="png-mode" checked={settings.pngMode === "lossy"}
                                         onChange={() => setSettings(s => ({ ...s, pngMode: "lossy" }))}
-                                        label="Smaller (palette)" hint="Reduces to a 256-colour palette. Where PNG savings are."
+                                        label="Smaller (palette)" hint="Reduces to a 256-colour palette. Where the big PNG savings are."
                                     />
                                     <Choice
                                         type="radio" name="png-mode" checked={settings.pngMode === "lossless"}
