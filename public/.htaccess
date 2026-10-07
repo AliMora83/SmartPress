@@ -37,4 +37,8 @@ Header set Cache-Control "public, max-age=31536000, immutable" env=NEXT_STATIC
 <FilesMatch "^sw\.js$">
     Header set Cache-Control "no-cache"
 </FilesMatch>
+# The manifest is unhashed; a long-cached copy would pin an old name/icons/theme.
+<FilesMatch "\.(webmanifest|json)$">
+    Header set Cache-Control "no-cache"
+</FilesMatch>
 </IfModule>
