@@ -14,21 +14,18 @@ ErrorDocument 404 /404.html
 # --- WebAssembly MIME type (required for streaming instantiation) ---
 <IfModule mod_mime.c>
 AddType application/wasm .wasm
+AddType application/manifest+json .webmanifest
 </IfModule>
 
 # --- Compression ---
 <IfModule mod_deflate.c>
 AddOutputFilterByType DEFLATE text/html text/css text/plain text/xml
-AddOutputFilterByType DEFLATE application/javascript text/javascript application/json
+AddOutputFilterByType DEFLATE application/javascript text/javascript application/json application/manifest+json
 AddOutputFilterByType DEFLATE image/svg+xml application/wasm
 </IfModule>
 
 # --- Caching ---
 <IfModule mod_headers.c>
-# Hashed build assets never change under the same name.
-SetEnvIf Request_URI "^/_next/static/" NEXT_STATIC
-Header set Cache-Control "public, max-age=31536000, immutable" env=NEXT_STATIC
-
 # HTML and any service worker must always revalidate.
 <FilesMatch "\.html$">
     Header set Cache-Control "no-cache"
@@ -36,4 +33,17 @@ Header set Cache-Control "public, max-age=31536000, immutable" env=NEXT_STATIC
 <FilesMatch "^sw\.js$">
     Header set Cache-Control "no-cache"
 </FilesMatch>
+# Unhashed assets keep the same URL across deploys, so they must revalidate too:
+# the manifest, Next's RSC payloads (index.txt, __next.*.txt) and the codec wasm.
+<FilesMatch "\.(webmanifest|json|txt|wasm)$">
+    Header set Cache-Control "no-cache"
+</FilesMatch>
+# ...and everything under /pdfjs/ (worker, fonts, CMaps).
+SetEnvIf Request_URI "^/pdfjs/" UNHASHED_PDFJS
+Header set Cache-Control "no-cache" env=UNHASHED_PDFJS
+
+# Hashed build assets never change under the same name. Last, so it wins over the
+# extension rules above if a file under _next/static/ happens to match one.
+SetEnvIf Request_URI "^/_next/static/" NEXT_STATIC
+Header set Cache-Control "public, max-age=31536000, immutable" env=NEXT_STATIC
 </IfModule>

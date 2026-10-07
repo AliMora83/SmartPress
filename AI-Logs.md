@@ -5,6 +5,53 @@
 
 ---
 
+## 2026-10-06 | Sprint 3.2b — PWA + offline | Claude (Sonnet 5.5)
+
+Branch `sprint/3.2b-pwa` (off main after #13 merged). Installable, and fully usable offline after one visit.
+
+**What shipped**
+- **Manifest + icons.** `public/manifest.webmanifest` (name/short_name SmartPress, `start_url` and `scope` `/`,
+  standalone, background and theme `#0C0E12` = `bg-ground`). Icons 192, 512 and 512 maskable in `public/icons/`,
+  rendered from `docs/design-system/smartpress-mark.svg` by `scripts/make-icons.mjs` (output committed; not from
+  fixtures). Layout links the manifest and sets `theme-color`. `.htaccess` adds `application/manifest+json`.
+- **Service worker, hand-written.** `public/sw.js` is a template; `scripts/inject-sw.mjs` (postbuild, after
+  prune) walks `out/` and writes `out/sw.js` with the precache list and cache name `smartpress-<hash>`, the hash
+  covering every precached path *and its bytes* (not the app version). Excludes `.htaccess`, `404.html`, `404/`,
+  `_not-found/`, `sw.js`. Precached files: cache-first. Navigations: network-first, fallback to the cached page
+  then `/`; skipped straight to cache when `navigator.onLine` is false. `HEAD` (Next link prefetch) answered from
+  cache. Old `smartpress-*` caches deleted on activate.
+- **Registration + updates** (`lib/pwa.ts`): production and `NEXT_PUBLIC_TARGET=web` only. No automatic
+  skipWaiting: the toast "Update ready" / Reload (`components/ui/UpdateToast.tsx`) posts SKIP_WAITING, and only
+  that tab reloads. Hidden while any file is queued or processing, and re-checked at click time.
+- **Guard** (`check-export.mjs`): allows the three icons; fails if `sw.js` still has the hash placeholder or an
+  empty list, if any precache entry is not a file in `out/`, or if `/`, `/licenses/` or the manifest are missing.
+
+**Precache:** 266 entries, 7.47 MB (cap 12 MB). `out/` is 9.6 MB. Largest: `pdfjs/pdf.worker.min.mjs` 1,265,413;
+two JS chunks 455,794 and 449,115; `wasm/pngquant_bg.wasm` 349,781; `wasm/webp_enc_simd.wasm` 345,584;
+`wasm/webp_enc.wasm` 281,261; `wasm/mozjpeg_enc.wasm` 251,524; `Smart_icon.png` 238,190 (unused by the app; precached
+because the list is a walk of `out/`).
+
+**A miss found and fixed:** the first offline run logged failed fetches. Next's link prefetch sends `HEAD /` from
+the licenses page, which the worker ignored (GET only), so it hit the network. Fixed in `sw.js`. Not a gap in the
+list generator: every file the app requests at runtime, including worker-initiated wasm and pdf.js assets, was
+served by the worker (77 responses from the SW in one offline session).
+
+**Verification** (Chrome 154 driven over CDP, against `npx serve out`; the built-in browser pane refuses service
+workers, so it couldn't be used):
+1. Load once: worker `activated`, controlling the page, 266 entries cached.
+2-3. Server **killed** and DevTools offline emulation on, then reload: page loads (`navigator.onLine` false).
+   Shift-reload bypasses any service worker by spec, so "hard reload" was a normal reload.
+4. Offline: JPG 180 KB → 63 KB, P1.png 1.02 MB → 103 KB, PDF 1.08 MB → 33 KB, all succeeded.
+   **0 failed requests** across reload and all three compressions, workers included. `/licenses/` works both by
+   link and by direct navigation; an unknown path falls back to the cached app. Leftover on the licenses page: 2
+   `ERR_ABORTED` events, Next cancelling its own prefetch (the same `HEAD` now answers 200 from cache).
+5. Update: rebuilt with one changed string and brought the server back. The open tab, with a batch (JPG, PNG, two
+   PDFs) running, had the new worker waiting in 32 of 69 busy samples and the toast showed in **none**. It appeared
+   once the batch finished; Reload applied the new build (new string shown, only the new cache remained, no
+   waiting worker).
+
+---
+
 ## 2026-10-06 | Sprint 3.2a follow-up — export hygiene | Claude (Sonnet 5.5)
 
 Same branch. The web export no longer ships fixtures, the bench route or the duplicate wasm.

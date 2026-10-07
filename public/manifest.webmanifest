@@ -1,0 +1,15 @@
+{
+  "name": "SmartPress",
+  "short_name": "SmartPress",
+  "description": "Fast, private image and PDF compression that runs entirely on your machine.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0C0E12",
+  "theme_color": "#0C0E12",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

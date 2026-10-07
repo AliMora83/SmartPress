@@ -7,6 +7,7 @@ import clsx from "clsx";
 import { Button } from "@/components/ui/Button";
 import { FILE_ROW_GRID, FileRow, type FileRowStatus } from "@/components/ui/FileRow";
 import { PresetSelector } from "@/components/ui/PresetSelector";
+import { UpdateToast } from "@/components/ui/UpdateToast";
 import { Wordmark } from "@/components/ui/Wordmark";
 import { filesFromDrop } from "@/lib/dropEntries";
 import { formatSaved, formatSize } from "@/lib/format";
@@ -17,6 +18,7 @@ import {
 } from "@/lib/codecs";
 import type { Format, PngMode, Preset } from "@/lib/codecs";
 import { appError, classify, MAX_INPUT_BYTES, type AppError } from "@/lib/errors";
+import { useServiceWorkerUpdate } from "@/lib/pwa";
 import { webSaver } from "@/lib/save/web";
 import type { SaveAllResult, SaveItem } from "@/lib/save/types";
 
@@ -498,6 +500,15 @@ export default function Compressor({ version }: { version: string }) {
         compressAll();
     }, [compressAll]);
 
+    // --- Update toast ---
+    // Offered only while idle, and re-checked at click time: an update must never
+    // appear or apply while a batch is running.
+    const { updateReady, applyUpdate } = useServiceWorkerUpdate();
+    const reloadForUpdate = useCallback(() => {
+        const running = filesRef.current.some(f => f.status === "processing" || f.status === "queued");
+        if (!running) applyUpdate();
+    }, [applyUpdate]);
+
     // --- Derived view state ---
 
     // Unsupported rows stay in the list but are not part of the batch: they are
@@ -780,6 +791,7 @@ export default function Compressor({ version }: { version: string }) {
                     </div>
                 </footer>
             </div>
+            {updateReady && !busy && <UpdateToast onReload={reloadForUpdate} />}
         </div>
     );
 }
