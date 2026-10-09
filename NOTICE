@@ -91,5 +91,8 @@ project are Apache-2.0, repackaged from Google's Squoosh (Apache-2.0).
 MIT, Copyright (c) 2026 Arjun Barrett. Builds the stored (level 0) ZIP that
 "Save all" downloads in browsers without a folder picker. Loaded only on that path.
 
+**Tauri** 2.x (`tauri`, `tauri-plugin-dialog`, `tauri-plugin-fs`, `tauri-plugin-opener`, `@tauri-apps/*`) —
+<https://tauri.app> — MIT OR Apache-2.0. Desktop shell only (`src-tauri/`); not part of the web build.
+
 Remaining runtime and build dependencies are MIT or Apache-2.0; see
 `package-lock.json` for the resolved set.

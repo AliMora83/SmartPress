@@ -5,6 +5,23 @@
 
 ---
 
+## 2026-10-09 | Sprint 3.1.0 — desktop app + pdf.js compatibility | Claude (Sonnet 5.5)
+
+Branch `sprint/3.3a-tauri-spike` (3.3a spike + 3.3b), rebased onto `main` after #18 (`89ccd7c`).
+
+**pdf.js (affects web too).** The modern build fails on macOS 13 WKWebView: it needs five shims (`Promise.withResolvers`, `Promise.try`, `URL.parse`, `Math.sumPrecise`, a global `Iterator`; without `Iterator` it throws at module load). Over the ~3-shim limit, so every target now uses the **legacy build** (vendored worker swapped too, SHA in `public/pdfjs/PROVENANCE.md`), plus one `Promise.withResolvers` shim (`lib/codecs/pdfjsCompat.ts`) applied in the codec worker and, via a blob preamble, in pdf.js's worker, only where missing. Flatten also calls `page.cleanup()` and `doc.cleanup()` after each page: in that WebKit a later page reusing resources from an earlier one never finished rendering (page 3 of 7); with it all pages render in 30-200 ms. Chrome bytes: legacy switch alone gave 0 differences over 14 PDF runs; with `cleanup()`, Trading Rapid Implementation (flatten) moved 383832 -> 383798 B and everything else matched. **383798 is the accepted new baseline.**
+- **Known, pre-existing nondeterminism:** Azibuye Company Profile (flatten) varies by 1 byte (1392811 / 1392812) in Chrome between identical runs. Seen on the old build too (1 of 8 runs); not caused by this work, though it showed up more often on the new build (4 of 8).
+
+**Desktop (Tauri 2, macOS).** `src-tauri/` wraps the export. Rust side: native file and folder dialogs, drop handling, and a runtime-only fs scope (no static scope in the capability file; picks and drops grant exactly what was chosen: a folder recursively, a file plus its folder non-recursively). `lib/save/tauri.ts` implements `Saver` with real per-file results, `createNew` writes (never overwrite, " (2)" suffix), and skips a kept original that would land on itself. `lib/desktop/native.ts` does picks, drops (folders walked, dot-files and symlinks skipped), reads and Show in folder via the opener plugin. Web gets none of it: the desktop code sits behind literal `NEXT_PUBLIC_TARGET === "desktop"` dynamic imports, and `out/` contains no `@tauri-apps`, `pick_files` or drop-event strings. Desktop UI: Same as source (default) and Choose folder are real, Browse enabled, Show in folder after a save. Unsigned `.app` only.
+
+**Verified in the built app** (driven by an `e2e`-feature build with env-driven pickers; the real NSOpenPanel and a Finder drag were not exercised): Same as source and Choose folder with JPEG, PNG, PDF (levels 1-2), kept-original skipped and untouched; originals byte-identical after every run; folder drop (the same Rust drop path) walked nested folders, ignored `.txt` and dot-files, wrote outputs next to each original; Show in folder brought Finder to the front. Web build re-checked in Chrome earlier for bytes.
+
+**Known issue, not fixed: PDF flatten renders blank pages in the desktop app.** It completes without error, and the output PDF is valid but every page is blank (verified by rendering `smartpress_Trading Rapid Implementation.pdf`; also with a plain DOM canvas and default pdf.js options, zero non-white pixels). pdf.js's drawing itself produces nothing in the macOS 13 system WebKit; cause not found. Levels 1-2 PDF are fine. README lists it. Needs a decision: disable flatten in the desktop target, or dig further.
+
+**Other:** JPEG bytes differ from Chrome by up to ~1.5% in the app (native decoders differ). Parked: Open with / right-click, format conversion, AVIF, auto-deploy, signing. Version 3.1.0.
+
+---
+
 ## 2026-10-09 | Fix 3.0.3 — decode orientation fallback | Claude (Sonnet 5.5)
 
 Branch `fix/3.0.3-decode-orientation` off `main`. Touches `lib/codecs/decode.ts` and a new `lib/codecs/exifOrientation.ts` only (plus version).
