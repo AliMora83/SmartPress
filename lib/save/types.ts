@@ -29,6 +29,8 @@ export interface SaveOneResult {
  */
 export interface SaveAllOptions {
     directory?: FileSystemDirectoryHandle;
+    /** ZIP name stem when the batch goes out as an archive. Default `smartpress`. */
+    archivePrefix?: string;
 }
 
 export interface SaveAllResult {

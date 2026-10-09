@@ -92,11 +92,11 @@ async function saveAllSequentially(items: SaveItem[]): Promise<SaveAllResult> {
     return { mode: "sequential", results };
 }
 
-/** `smartpress_2026-10-09-1432.zip`, local time. */
-function zipName(now = new Date()): string {
+/** `smartpress_2026-10-09-1432.zip` (or `smartpress_webp_…`), local time. */
+function zipName(prefix: string, now = new Date()): string {
     const p = (n: number) => String(n).padStart(2, "0");
     const stamp = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}`;
-    return `smartpress_${stamp}.zip`;
+    return `${prefix}_${stamp}.zip`;
 }
 
 /** Two rows can share an output name (same file added twice); a ZIP entry name must be unique. */
@@ -120,14 +120,14 @@ function uniqueEntryNames(items: SaveItem[]): string[] {
  * compressed and deflating them again costs time for nothing. `fflate` is
  * imported here, not at the top, so it loads only when this path runs.
  */
-async function saveAllAsZip(items: SaveItem[]): Promise<SaveAllResult> {
+async function saveAllAsZip(items: SaveItem[], prefix: string): Promise<SaveAllResult> {
     const { zipSync } = await import("fflate");
     const names = uniqueEntryNames(items);
     const entries: Record<string, Uint8Array> = {};
     for (let i = 0; i < items.length; i++) {
         entries[names[i]] = new Uint8Array(await items[i].blob.arrayBuffer());
     }
-    const archive = zipName();
+    const archive = zipName(prefix);
     const bytes = zipSync(entries, { level: 0 });
     triggerAnchorDownload(new Blob([bytes as unknown as BlobPart], { type: "application/zip" }), archive);
     return {
@@ -138,13 +138,33 @@ async function saveAllAsZip(items: SaveItem[]): Promise<SaveAllResult> {
 }
 
 /** Everything without a working folder picker: one file downloads directly, several as a ZIP. */
-async function saveAllFallback(items: SaveItem[]): Promise<SaveAllResult> {
+async function saveAllFallback(items: SaveItem[], prefix: string): Promise<SaveAllResult> {
     if (items.length < 2) return await saveAllSequentially(items);
     try {
-        return await saveAllAsZip(items);
+        return await saveAllAsZip(items, prefix);
     } catch {
         // Archive build failed (e.g. out of memory): staggered downloads beat nothing.
         return await saveAllSequentially(items);
+    }
+}
+
+/**
+ * A directory handle held from earlier can have lost its permission (the browser
+ * expires grants). Ask again -- this runs inside the Save click, so the prompt
+ * is allowed -- and report whether writing is possible. Handles without the
+ * permission API are assumed fine; a real failure still surfaces per file.
+ */
+async function ensureWritable(dir: FileSystemDirectoryHandle): Promise<boolean> {
+    const h = dir as FileSystemDirectoryHandle & {
+        queryPermission?: (d: { mode: "readwrite" }) => Promise<PermissionState>;
+        requestPermission?: (d: { mode: "readwrite" }) => Promise<PermissionState>;
+    };
+    try {
+        const d = { mode: "readwrite" } as const;
+        if (!h.queryPermission || (await h.queryPermission(d)) === "granted") return true;
+        return !!h.requestPermission && (await h.requestPermission(d)) === "granted";
+    } catch {
+        return false;
     }
 }
 
@@ -160,7 +180,12 @@ export const webSaver: Saver = {
 
     async saveAll(items: SaveItem[], options?: SaveAllOptions): Promise<SaveAllResult> {
         if (!items.length) return { mode: "sequential", results: [] };
-        if (options?.directory) return await saveAllToDirectory(items, options.directory);
+        const prefix = options?.archivePrefix ?? "smartpress";
+        if (options?.directory) {
+            // Lapsed and denied: take the same path a browser without a picker takes.
+            if (await ensureWritable(options.directory)) return await saveAllToDirectory(items, options.directory);
+            return await saveAllFallback(items, prefix);
+        }
         if (hasDirectoryPicker()) {
             try {
                 return await saveAllToDirectory(items);
@@ -168,9 +193,9 @@ export const webSaver: Saver = {
                 // The picker call itself failed for some reason other than the
                 // user cancelling (caught above) -- fall back rather than
                 // dead-end the button.
-                return await saveAllFallback(items);
+                return await saveAllFallback(items, prefix);
             }
         }
-        return await saveAllFallback(items);
+        return await saveAllFallback(items, prefix);
     },
 };
