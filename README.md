@@ -57,6 +57,42 @@ start — that is the point.
 
 ---
 
+## 🖥 Desktop app (macOS)
+
+The same static export runs inside a [Tauri 2](https://tauri.app) window (`src-tauri/`), personal
+use, unsigned. It adds what a browser can't do: real file paths, so **Same as source** writes
+`smartpress_<name>` next to each original (originals are never overwritten; an existing name gets
+` (2)`), a native **Choose folder** picker, folder drops, and **Show in folder**. Compression is
+identical code; nothing is sent anywhere. The web build contains none of the desktop code.
+
+Filesystem access has no static scope: the Rust side grants the fs plugin only what you pick or
+drop (a chosen folder recursively; a chosen file's own folder, non-recursively, so output can sit
+next to it). See `src-tauri/capabilities/default.json` and `src-tauri/src/lib.rs`.
+
+**Build locally** (macOS, Xcode Command Line Tools and [Rust](https://rustup.rs) installed):
+
+```bash
+npm ci
+npm run tauri build -- --bundles app
+# -> src-tauri/target/release/bundle/macos/SmartPress.app
+```
+
+`beforeBuildCommand` runs `NEXT_PUBLIC_TARGET=desktop npm run build`. The desktop target has no
+service worker and no PWA manifest. The `e2e` Cargo feature (env-driven pickers for scripted
+tests) is off in a normal build.
+
+**Known issues**
+- **No PDF flatten in the desktop app.** pdf.js draws nothing in the macOS 13 system WebKit, so the
+  "Keep PDF text selectable" option is hidden there and text is always kept (levels 1-2). Every
+  target also has a blank-render guard: if a flatten produces only blank pages it is discarded and
+  the row says "Flattening failed". Use the web build for flatten.
+- JPEG output bytes differ from Chrome by up to about 1.5% (each engine decodes JPEG natively).
+
+**Parked:** Open with / right-click integration, format conversion, AVIF, auto-deploy, code
+signing and notarization.
+
+---
+
 ## 📝 File Structure
 
 ```

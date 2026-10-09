@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "SmartPress main window. No static filesystem scope: the Rust side grants runtime access only to what the user picks (dialog) or drops.",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:default",
+    "allow-pick-files",
+    "allow-pick-folder",
+    "fs:allow-read-file",
+    "fs:allow-read-dir",
+    "fs:allow-write-file",
+    "opener:allow-reveal-item-in-dir"
+  ]
+}

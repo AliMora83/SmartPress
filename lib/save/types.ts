@@ -10,14 +10,20 @@ export interface SaveItem {
     newSize: number;
     /** "original" is the keep-original-file outcome from `isWorthKeeping()`. */
     status: "compressed" | "original";
+    /** Desktop only: where the original file lives, so output can go next to it. */
+    sourcePath?: string;
 }
 
-export type SaveOutcome = "written" | "sent" | "failed";
+/** "skipped": nothing was written on purpose (e.g. a kept original that would land on itself). */
+export type SaveOutcome = "written" | "sent" | "failed" | "skipped";
 
 export interface SaveOneResult {
     filename: string;
     outcome: SaveOutcome;
+    /** Why it failed or was skipped. */
     error?: string;
+    /** Desktop only: the path actually written (it may carry a " (2)" suffix). */
+    path?: string;
 }
 
 /**
@@ -31,14 +37,20 @@ export interface SaveAllOptions {
     directory?: FileSystemDirectoryHandle;
     /** ZIP name stem when the batch goes out as an archive. Default `smartpress`. */
     archivePrefix?: string;
+    /** Desktop: write each file next to its original. */
+    nextToSource?: boolean;
+    /** Desktop: write into this folder (a path, not a handle). */
+    folderPath?: string;
 }
 
 export interface SaveAllResult {
     /** Which strategy actually ran, so the UI can word the notice correctly. */
-    mode: "directory" | "sequential" | "zip" | "cancelled";
+    mode: "directory" | "sequential" | "zip" | "native" | "cancelled";
     results: SaveOneResult[];
     /** Name of the archive handed to the browser. Set only when mode is "zip". */
     archive?: string;
+    /** Desktop: where it went, for the notice ("next to the originals", "to <folder>"). */
+    destination?: string;
 }
 
 /**
@@ -47,6 +59,6 @@ export interface SaveAllResult {
  * behind this same interface -- nothing above this line needs to know which.
  */
 export interface Saver {
-    saveOne(item: SaveItem): Promise<SaveOneResult>;
+    saveOne(item: SaveItem, options?: SaveAllOptions): Promise<SaveOneResult>;
     saveAll(items: SaveItem[], options?: SaveAllOptions): Promise<SaveAllResult>;
 }

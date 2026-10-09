@@ -19,8 +19,9 @@ import {
 import type { Format, PngMode, Preset } from "@/lib/codecs";
 import { appError, classify, MAX_INPUT_BYTES, type AppError } from "@/lib/errors";
 import { useServiceWorkerUpdate } from "@/lib/pwa";
-import { webSaver } from "@/lib/save/web";
-import type { SaveAllResult, SaveItem } from "@/lib/save/types";
+import { loadNative } from "@/lib/desktop/load";
+import { getSaver } from "@/lib/save";
+import type { SaveAllOptions, SaveAllResult, SaveItem } from "@/lib/save/types";
 
 /**
  * What the dropzone accepts, behind two independent gates.
@@ -74,11 +75,12 @@ function isAcceptedFile(file: File): boolean {
 }
 
 /**
- * Build target. "web" (the default) can't write next to the source file, so it
- * offers Choose folder only. "desktop" (Tauri, Sprint 3.3) keeps "Same as source".
- * Inlined at build time by Next, so the unused branch is dead code in the export.
+ * Desktop target (Tauri, Sprint 3.3b): real file paths, so "Same as source" works and
+ * saving goes through the native Saver. Everything desktop-only is loaded with a
+ * dynamic import (see lib/desktop/load.ts and lib/save/index.ts: a positive literal
+ * `process.env.NEXT_PUBLIC_TARGET === "desktop"` test, which the bundler folds away on web).
  */
-const IS_WEB = (process.env.NEXT_PUBLIC_TARGET ?? "web") !== "desktop";
+const IS_DESKTOP = process.env.NEXT_PUBLIC_TARGET === "desktop";
 const ACCEPTED_LABEL = ACCEPTED_FORMATS
     .map(f => CAPABILITIES[f].extension.toUpperCase())
     .join(", ");
@@ -143,7 +145,9 @@ interface FileItem {
     newSize?: number;
     alreadyOptimal?: boolean;
     /** How this row's result was last handed off, once lib/save/ has done it. */
-    saved?: "written" | "sent";
+    saved?: "written" | "sent" | "skipped";
+    /** Desktop only: the original file's path, so output can be written next to it. */
+    sourcePath?: string;
     /** PDF only, set once compression completes. */
     pageCount?: number;
     pdfNote?: "signed" | "flatten-not-smaller" | "flatten-failed";
@@ -179,6 +183,11 @@ export default function Compressor({ version }: { version: string }) {
     const [lastBatch, setLastBatch] = useState<SaveAllResult | null>(null);
     /** Whether that outcome came from Save all WebP, so the notice can say "WebP". */
     const [lastBatchWebp, setLastBatchWebp] = useState(false);
+    /** Desktop only: where saves go ("source" = next to each original) and the chosen folder's path. */
+    const [saveTo, setSaveTo] = useState<"source" | "folder">(IS_DESKTOP ? "source" : "folder");
+    const [desktopFolder, setDesktopFolder] = useState<string | null>(null);
+    /** Desktop only: a path inside the last save, for Show in folder. */
+    const [revealPath, setRevealPath] = useState<string | null>(null);
     /**
      * The clock, read only inside the effect below and never during render --
      * render must be a pure function of props/state, and `Date.now()` isn't.
@@ -198,6 +207,9 @@ export default function Compressor({ version }: { version: string }) {
     // without re-subscribing on every change.
     const filesRef = useRef<FileItem[]>([]);
     useEffect(() => { filesRef.current = files; }, [files]);
+
+    const destRef = useRef({ saveTo, desktopFolder });
+    useEffect(() => { destRef.current = { saveTo, desktopFolder }; }, [saveTo, desktopFolder]);
 
     // Settings likewise: a job dispatched from a chained handler must use the
     // values on screen, not the ones captured when the handler was created.
@@ -255,9 +267,9 @@ export default function Compressor({ version }: { version: string }) {
 
     // --- Queue management ---
 
-    const handleFileSelect = useCallback((selected: ArrayLike<File> | null) => {
+    const handleFileSelect = useCallback((selected: ArrayLike<File> | null, paths?: string[]) => {
         if (!selected?.length) return;
-        const added: FileItem[] = Array.from(selected).map(file => {
+        const added: FileItem[] = Array.from(selected).map((file, i) => {
             const supported = isAcceptedFile(file);
             const format = supported ? formatFromMime(file.type) : null;
             const tooBig = supported && file.size > MAX_INPUT_BYTES;
@@ -274,10 +286,36 @@ export default function Compressor({ version }: { version: string }) {
                 progress: 0,
                 error,
                 originalSize: file.size,
+                sourcePath: paths?.[i],
             };
         });
         setFiles(prev => [...prev, ...added]);
     }, []);
+
+    /** Add files: the native dialog on desktop (it returns paths), the hidden input on web. */
+    const openPicker = useCallback(async () => {
+        if (process.env.NEXT_PUBLIC_TARGET === "desktop") {
+            const native = await loadNative();
+            const items = await native.pickFiles();
+            handleFileSelect(items.map(i => i.file), items.map(i => i.path));
+            return;
+        }
+        document.getElementById("file-input")?.click();
+    }, [handleFileSelect]);
+
+    // Desktop: the OS hands drops to Tauri (with paths), not to the page's drop events.
+    useEffect(() => {
+        if (process.env.NEXT_PUBLIC_TARGET !== "desktop") return;
+        let dead = false;
+        const un: (() => void)[] = [];
+        (async () => {
+            const native = await loadNative();
+            const a = await native.onDrop(items => handleFileSelect(items.map(i => i.file), items.map(i => i.path)));
+            const b = await native.onDragHover(setDragActive);
+            if (dead) { a(); b(); } else un.push(a, b);
+        })();
+        return () => { dead = true; un.forEach(f => f()); };
+    }, [handleFileSelect]);
 
     const handleDrag = (e: DragEvent) => {
         e.preventDefault();
@@ -338,7 +376,8 @@ export default function Compressor({ version }: { version: string }) {
                     quality: PRESET_SCALE[settingsRef.current.preset],
                     pngMode: settingsRef.current.pngMode,
                     pngPreset: settingsRef.current.preset,
-                    keepTextSelectable: settingsRef.current.keepTextSelectable,
+                    // Desktop always keeps text: flatten is not offered there (pdf.js renders blank in its WebKit).
+                    keepTextSelectable: IS_DESKTOP ? true : settingsRef.current.keepTextSelectable,
                 },
                 onProgress: (progress, stage) => setFiles(prev => prev.map(f =>
                     f.id === id ? { ...f, status: "processing", progress, stage } : f)),
@@ -431,15 +470,38 @@ export default function Compressor({ version }: { version: string }) {
         originalSize: f.originalSize ?? f.file.size,
         newSize: f.newSize ?? f.resultBlob!.size,
         status: f.alreadyOptimal ? "original" : "compressed",
+        sourcePath: f.sourcePath,
     }), []);
+
+    /** Desktop: the native folder dialog. Choosing a folder makes it the destination. */
+    const pickDesktopFolder = useCallback(async (): Promise<string | null> => {
+        if (process.env.NEXT_PUBLIC_TARGET !== "desktop") return null;
+        const native = await loadNative();
+        const path = await native.pickFolder();
+        if (path) { setDesktopFolder(path); setSaveTo("folder"); destRef.current = { saveTo: "folder", desktopFolder: path }; }
+        return path;
+    }, []);
+
+    /** Desktop: where the next save goes, asking for a folder first if that is the destination and none is chosen. */
+    const desktopOptions = useCallback(async (): Promise<SaveAllOptions | null> => {
+        const { saveTo: to, desktopFolder: folderPath } = destRef.current;
+        if (to === "source") return { nextToSource: true };
+        const path = folderPath ?? await pickDesktopFolder();
+        return path ? { folderPath: path } : null;
+    }, [pickDesktopFolder]);
 
     const saveRow = useCallback(async (id: string) => {
         const item = filesRef.current.find(f => f.id === id);
         if (!item?.resultBlob) return;
-        const { outcome } = await webSaver.saveOne(toSaveItem(item));
+        const options = IS_DESKTOP ? await desktopOptions() : {};
+        if (!options) return;
+        const saver = await getSaver();
+        const one = await saver.saveOne(toSaveItem(item), options);
+        if (one.path) setRevealPath(one.path);
+        const outcome = one.outcome;
         if (outcome === "failed") return;
         setFiles(prev => prev.map(f => f.id === id ? { ...f, saved: outcome } : f));
-    }, [toSaveItem]);
+    }, [toSaveItem, desktopOptions]);
 
     /**
      * "Save all". Chromium gets a folder picked once with every file written
@@ -458,10 +520,15 @@ export default function Compressor({ version }: { version: string }) {
             && (mode === "all" || !f.saved) && (!webpOnly || f.convertedTo === "webp"));
         if (!ready.length) return;
         setLastBatch(null);
-        const result = await webSaver.saveAll(ready.map(toSaveItem), {
-            directory,
+        const options: SaveAllOptions | null = IS_DESKTOP ? await desktopOptions() : { directory };
+        if (!options) return;
+        const saver = await getSaver();
+        const result = await saver.saveAll(ready.map(toSaveItem), {
+            ...options,
             archivePrefix: webpOnly ? "smartpress_webp" : undefined,
         });
+        const firstPath = result.results.find(r => r.path)?.path;
+        if (firstPath) setRevealPath(firstPath);
         const outcomeByName = new Map(result.results.map(r => [r.filename, r.outcome]));
         setFiles(prev => prev.map(f => {
             if (f.status !== "done" || !f.resultBlob) return f;
@@ -474,7 +541,7 @@ export default function Compressor({ version }: { version: string }) {
         }));
         setLastBatchWebp(webpOnly);
         setLastBatch(result);
-    }, [toSaveItem]);
+    }, [toSaveItem, desktopOptions]);
 
     // --- Destination folder ---
     // Held in memory only: a directory handle is not a setting (IndexedDB stores
@@ -489,12 +556,13 @@ export default function Compressor({ version }: { version: string }) {
     );
 
     const pickFolder = useCallback(async () => {
+        if (IS_DESKTOP) { await pickDesktopFolder(); return; }
         try {
             setFolder(await window.showDirectoryPicker!({ mode: "readwrite" }));
         } catch {
             // Cancelled, or permission refused: keep whatever was chosen before.
         }
-    }, []);
+    }, [pickDesktopFolder]);
 
     // When a batch started by Start finishes and a folder is chosen, write the
     // results straight into it. The batch flag is set by Start only, so adding
@@ -505,8 +573,10 @@ export default function Compressor({ version }: { version: string }) {
         batchRef.current = false;
         // Deferred a tick: downloadAll() resets the previous save notice first,
         // and setState must not run synchronously in an effect body.
-        if (folder) queueMicrotask(() => { void downloadAll(folder, "unsaved"); });
-    }, [busy, folder, downloadAll]);
+        // Desktop: Same as source always has a destination; a folder only once chosen.
+        const desktopReady = IS_DESKTOP && (saveTo === "source" || desktopFolder !== null);
+        if (folder || desktopReady) queueMicrotask(() => { void downloadAll(folder ?? undefined, "unsaved"); });
+    }, [busy, folder, saveTo, desktopFolder, downloadAll]);
 
     const start = useCallback(() => {
         batchRef.current = true;
@@ -531,6 +601,12 @@ export default function Compressor({ version }: { version: string }) {
     const doneRows = files.filter(f => f.status === "done" && f.resultBlob);
     const anyDone = doneRows.length > 0;
     const webpToSave = files.filter(f => f.status === "done" && f.resultBlob && f.convertedTo === "webp" && !f.saved).length;
+    const unsavedDone = doneRows.filter(f => !f.saved).length;
+    /** Desktop: reveal the last saved file in Finder. */
+    const revealInFinder = async () => {
+        if (process.env.NEXT_PUBLIC_TARGET !== "desktop" || !revealPath) return;
+        await (await loadNative()).reveal(revealPath);
+    };
     const nudgeCount = files.filter(f => f.status === "done" && f.webpOffer).length;
     const inFlight = files.filter(f => f.status === "queued" || f.status === "processing").length;
     const totalOriginal = doneRows.reduce((n, f) => n + (f.originalSize ?? f.file.size), 0);
@@ -606,6 +682,12 @@ export default function Compressor({ version }: { version: string }) {
         const failed = lastBatch.results.filter(r => r.outcome === "failed").length;
         const ok = lastBatch.results.length - failed;
         if (lastBatch.mode === "cancelled") return "Save cancelled";
+        if (lastBatch.mode === "native") {
+            const skipped = lastBatch.results.filter(r => r.outcome === "skipped").length;
+            const wrote = lastBatch.results.filter(r => r.outcome === "written").length;
+            const label = `${wrote} ${lastBatchWebp ? "WebP " : ""}${wrote === 1 ? "file" : "files"}`;
+            return `${label} saved ${lastBatch.destination}${skipped ? ` · ${skipped} unchanged, not written` : ""}${failed ? ` · ${failed} failed` : ""}`;
+        }
         const noun = `${ok} ${lastBatchWebp ? "WebP " : ""}${ok === 1 ? "file" : "files"}`;
         if (lastBatch.mode === "zip") return `${noun} sent to downloads as ${lastBatch.archive}`;
         const where = lastBatch.mode === "directory" ? `to ${folder?.name ?? "folder"}` : "to downloads";
@@ -623,7 +705,7 @@ export default function Compressor({ version }: { version: string }) {
                     <Wordmark version={version} />
                     <div className="flex items-center gap-2">
                         <Button variant="quiet" onClick={clearAll} disabled={files.length === 0}>Clear list</Button>
-                        <Button variant="secondary" onClick={() => document.getElementById("file-input")?.click()}>
+                        <Button variant="secondary" onClick={() => { void openPicker(); }}>
                             Add files
                         </Button>
                         <input
@@ -652,11 +734,11 @@ export default function Compressor({ version }: { version: string }) {
                                 "flex flex-shrink-0 cursor-pointer items-center justify-between gap-4 rounded-xl border border-dashed px-5 py-4 transition-colors",
                                 dragActive ? "border-control-border bg-raised" : "border-line-strong hover:bg-surface",
                             )}
-                            onClick={() => document.getElementById("file-input")?.click()}
+                            onClick={() => { void openPicker(); }}
                             onKeyDown={(e) => {
                                 if (e.key === "Enter" || e.key === " ") {
                                     e.preventDefault();
-                                    document.getElementById("file-input")?.click();
+                                    void openPicker();
                                 }
                             }}
                             onDragEnter={handleDrag}
@@ -722,6 +804,7 @@ export default function Compressor({ version }: { version: string }) {
                                 </div>
                             </fieldset>
 
+                            {!IS_DESKTOP && (
                             <section>
                                 <h2 className="label-mono mb-3 text-text-muted">PDF</h2>
                                 <Choice
@@ -731,17 +814,41 @@ export default function Compressor({ version }: { version: string }) {
                                     hint="Off flattens each page to an image. Smaller, but text and links are lost."
                                 />
                             </section>
+                            )}
 
                             <fieldset>
                                 <legend className="label-mono mb-3 text-text-muted">Save to</legend>
                                 <div className="flex flex-col gap-3">
-                                    {!IS_WEB && (
-                                        <Choice
-                                            type="radio" name="save-to" checked={false} disabled
-                                            onChange={() => {}}
-                                            label="Same as source" hint="Desktop app only. A browser can't write next to the original."
-                                        />
-                                    )}
+                                    {IS_DESKTOP ? (
+                                        <>
+                                            <Choice
+                                                type="radio" name="save-to" checked={saveTo === "source"}
+                                                onChange={() => setSaveTo("source")}
+                                                label="Same as source"
+                                                hint="Saved next to each original as smartpress_<name>. Originals are never overwritten."
+                                            />
+                                            <Choice
+                                                type="radio" name="save-to" checked={saveTo === "folder"}
+                                                onChange={() => setSaveTo("folder")}
+                                                label="Choose folder"
+                                                hint={desktopFolder ? "Finished files are written here." : "Pick a folder and finished files save there."}
+                                            />
+                                            <div className="flex gap-2">
+                                                <div
+                                                    className="data-mono flex h-8 min-w-0 flex-1 items-center rounded-md border border-control-border bg-ground px-3 text-text-muted"
+                                                    title={desktopFolder ?? undefined}
+                                                >
+                                                    <span className="truncate">
+                                                        {desktopFolder ? desktopFolder.slice(desktopFolder.lastIndexOf("/") + 1) : "No folder chosen"}
+                                                    </span>
+                                                </div>
+                                                <Button variant="quiet" onClick={() => { void pickFolder(); }}>
+                                                    Browse
+                                                </Button>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <>
                                     <Choice
                                         type="radio" name="save-to" checked readOnly
                                         onChange={() => {}}
@@ -763,6 +870,8 @@ export default function Compressor({ version }: { version: string }) {
                                             Browse
                                         </Button>
                                     </div>
+                                        </>
+                                    )}
                                 </div>
                             </fieldset>
                         </div>
@@ -805,9 +914,16 @@ export default function Compressor({ version }: { version: string }) {
                                 Save all WebP
                             </Button>
                         )}
-                        {anyDone && inFlight === 0 && !folder && (
-                            <Button variant="quiet" size="sm" onClick={() => { void downloadAll(); }}>Save all</Button>
+                        {IS_DESKTOP && revealPath && inFlight === 0 && (
+                            <Button variant="quiet" size="sm" onClick={() => { void revealInFinder(); }}>Show in folder</Button>
                         )}
+                        {IS_DESKTOP
+                            ? (unsavedDone > 0 && inFlight === 0 && (
+                                <Button variant="quiet" size="sm" onClick={() => { void downloadAll(undefined, "unsaved"); }}>Save all</Button>
+                            ))
+                            : (anyDone && inFlight === 0 && !folder && (
+                                <Button variant="quiet" size="sm" onClick={() => { void downloadAll(); }}>Save all</Button>
+                            ))}
                         {/* SmartPress is GPLv3 and ships vendored GPL binaries to the
                             browser, so the notices and the source have to be reachable
                             from the running app -- not only from the repository. */}

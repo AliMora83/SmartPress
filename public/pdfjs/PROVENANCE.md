@@ -15,11 +15,11 @@ All three are unmodified copies out of the installed `pdfjs-dist` npm package
 
 | Path | Source (`pdfjs-dist@6.3.289`) | Files | Bytes |
 |---|---|---|---|
-| `pdf.worker.min.mjs` | `build/pdf.worker.min.mjs` | 1 | 1,265,413 |
+| `pdf.worker.min.mjs` | `legacy/build/pdf.worker.min.mjs` | 1 | 1,317,034 |
 | `standard_fonts/` | `standard_fonts/` | 16 | 835,584 |
 | `cmaps/` | `cmaps/` | 169 | 1,695,744 |
 
-`pdf.worker.min.mjs` SHA-256: `8ab0e5e30031b4a06ecfddd5ae9562f0227f830ee7ec9ed1a968b134243d2386`
+`pdf.worker.min.mjs` SHA-256: `a33cfe728c584fdba4fcc1fd54bcdc2f9f2f13889ddbb5b2bd1d0f8cbe49b84e`
 
 `standard_fonts/` and `cmaps/` are each ~16-169 small per-glyph-set/per-encoding
 files (Foxit substitute fonts and Adobe CMap tables), so they're verified as a
@@ -42,10 +42,20 @@ vendored copies instead of it trying (and, off a CDN, failing) to fetch them
 itself. `cMapPacked: true` because these ship as pdfjs's binary `.bcmap`
 format, not plain text.
 
+## Legacy build (3.1.0)
+
+The worker and the main module (`pdfjs-dist/legacy/build/pdf.mjs`, imported in
+`pdfFlatten.ts`) are the **legacy** build, for every target. The modern build
+does not run in the system WKWebView on macOS 13 (the engine Tauri uses): it
+needs `Promise.withResolvers`, `Promise.try`, `URL.parse`, `Math.sumPrecise`
+and a global `Iterator` with helpers (missing `Iterator` throws at module
+load). The legacy build needs only `Promise.withResolvers`, shimmed in
+`lib/codecs/pdfjsCompat.ts` and only where the engine lacks it.
+
 ## Regenerating
 
 ```
-cp node_modules/pdfjs-dist/build/pdf.worker.min.mjs public/pdfjs/
+cp node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs public/pdfjs/
 cp node_modules/pdfjs-dist/standard_fonts/* public/pdfjs/standard_fonts/
 cp node_modules/pdfjs-dist/cmaps/* public/pdfjs/cmaps/
 ```

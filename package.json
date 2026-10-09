@@ -1,6 +1,6 @@
 {
   "name": "smartpress",
-  "version": "3.0.3",
+  "version": "3.1.0",
   "private": true,
   "license": "GPL-3.0-or-later",
   "scripts": {
@@ -8,12 +8,16 @@
     "build": "next build",
     "postbuild": "node scripts/prune-export.mjs && node scripts/inject-sw.mjs && node scripts/check-export.mjs",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "tauri": "tauri"
   },
   "dependencies": {
     "@jsquash/avif": "2.1.1",
     "@jsquash/jpeg": "1.6.0",
     "@jsquash/webp": "1.5.0",
+    "@tauri-apps/api": "^2.12.2",
+    "@tauri-apps/plugin-fs": "^2.6.0",
+    "@tauri-apps/plugin-opener": "^2.7.0",
     "clsx": "^2.1.1",
     "fflate": "^0.8.3",
     "idb-keyval": "^6.2.2",
@@ -27,6 +31,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@tauri-apps/cli": "^2.12.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

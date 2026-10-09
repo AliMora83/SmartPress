@@ -31,6 +31,7 @@
  */
 import type { EncodeOptions } from "./types";
 import { resolveAssetUrl } from "./loader";
+import { applyPdfjsShims, pdfjsWorkerSrc } from "./pdfjsCompat";
 
 const FLATTEN_SCALE = 150 / 72; // 150dpi, matching the Sprint 2.1 spike
 
@@ -93,12 +94,23 @@ class NoopFilterFactory {
     destroy(): void {}
 }
 
+/** True if any pixel is not (near-)white. Transparent pixels (alpha 0) don't count as ink. */
+function hasInk(ctx: OffscreenCanvasRenderingContext2D, width: number, height: number): boolean {
+    const d = ctx.getImageData(0, 0, width, height).data;
+    for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] > 0 && (d[i] < 250 || d[i + 1] < 250 || d[i + 2] < 250)) return true;
+    }
+    return false;
+}
+
 export async function flattenPdf(bytes: Uint8Array, options: EncodeOptions): Promise<Uint8Array> {
+    // The legacy build (see pdfjsCompat.ts), with its one shim applied before it loads.
+    applyPdfjsShims();
     const [pdfjs, pdfLib] = await Promise.all([
-        import("pdfjs-dist"),
+        import("pdfjs-dist/legacy/build/pdf.mjs"),
         import("pdf-lib"),
     ]);
-    pdfjs.GlobalWorkerOptions.workerSrc = resolveAssetUrl("/pdfjs/pdf.worker.min.mjs");
+    pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorkerSrc(resolveAssetUrl("/pdfjs/pdf.worker.min.mjs"));
 
     const doc = await pdfjs.getDocument({
         data: bytes,
@@ -110,6 +122,9 @@ export async function flattenPdf(bytes: Uint8Array, options: EncodeOptions): Pro
         FilterFactory: NoopFilterFactory,
     } as unknown as Parameters<typeof pdfjs.getDocument>[0]).promise;
     const outDoc = await pdfLib.PDFDocument.create();
+    // pdf.js can finish "successfully" yet draw nothing in some engines (the macOS 13
+    // system WebKit renders every page blank). Blank output must never pass as a result.
+    let anyInk = false;
 
     for (let i = 1; i <= doc.numPages; i++) {
         const page = await doc.getPage(i);
@@ -129,6 +144,7 @@ export async function flattenPdf(bytes: Uint8Array, options: EncodeOptions): Pro
             canvasContext: ctx, canvas, viewport, annotationMode: pdfjs.AnnotationMode.DISABLE,
         } as unknown as Parameters<typeof page.render>[0];
         await page.render(renderParams).promise;
+        if (!anyInk) anyInk = hasInk(ctx, canvas.width, canvas.height);
 
         const blob = await canvas.convertToBlob({
             type: "image/jpeg",
@@ -138,7 +154,16 @@ export async function flattenPdf(bytes: Uint8Array, options: EncodeOptions): Pro
         const img = await outDoc.embedJpg(jpegBytes);
         const outPage = outDoc.addPage([viewport.width, viewport.height]);
         outPage.drawImage(img, { x: 0, y: 0, width: viewport.width, height: viewport.height });
+
+        // Release this page's resources and pdf.js's shared caches before the next
+        // page. Besides bounding memory on long documents, it is load-bearing in the
+        // system WKWebView on macOS 13: without it, a later page that reuses
+        // resources from an earlier one never finishes rendering (page 3 of a 7-page
+        // PDF hung for minutes). Chrome's output is unaffected.
+        page.cleanup();
+        await doc.cleanup();
     }
 
+    if (!anyInk) throw new Error("FLATTEN_BLANK: every rendered page was blank");
     return outDoc.save();
 }
