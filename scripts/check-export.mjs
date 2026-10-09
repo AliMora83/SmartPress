@@ -2,7 +2,7 @@
 //
 // Allowed (everything else matching a rule below fails):
 //  - raster/PDF files (.png .jpg .jpeg .pdf) under out/_next/ (bundler-emitted assets)
-//  - out/icon.png and out/Smart_icon.png (the app's own icons)
+//  - out/icon.png (the app's own icon)
 //  - out/icons/icon-192.png, icon-512.png, icon-maskable-512.png (PWA icons)
 //  - .wasm only under out/wasm/ (the vendored codecs)
 // Forbidden anywhere: a __fixtures directory, a bench route/directory.
@@ -11,7 +11,7 @@ import { join, relative, sep } from "node:path";
 
 const OUT = "out";
 const ALLOWED_ICONS = new Set([
-    "icon.png", "Smart_icon.png",
+    "icon.png",
     "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png",
 ]);
 const bad = [];

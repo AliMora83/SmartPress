@@ -389,11 +389,12 @@ export default function Compressor({ version }: { version: string }) {
      * Swap a PNG row's output for the WebP the nudge offered. Replaces rather
      * than adds: the row has one output, and it is now the WebP under a .webp
      * name. `saved` is cleared because whatever was handed off before is no
-     * longer this row's result.
+     * longer this row's result. The one swap shared by the per-row Convert and
+     * Convert all, so the two cannot drift.
      */
-    const convertToWebp = useCallback((id: string) => {
+    const convertToWebp = useCallback((id?: string) => {
         setFiles(prev => prev.map(f => {
-            if (f.id !== id || !f.webpOffer) return f;
+            if ((id !== undefined && f.id !== id) || f.status !== "done" || !f.webpOffer) return f;
             return {
                 ...f,
                 resultBlob: f.webpOffer.blob,
@@ -405,6 +406,7 @@ export default function Compressor({ version }: { version: string }) {
                 saved: undefined,
             };
         }));
+        setLastBatch(null);
     }, []);
 
     const compressAll = useCallback(() => {
@@ -438,10 +440,9 @@ export default function Compressor({ version }: { version: string }) {
     }, [toSaveItem]);
 
     /**
-     * "Download All", permanent now that ZIP is cancelled. Chromium gets a
-     * folder picked once with every file written directly and success known
-     * per file; everywhere else falls back to staggered anchor clicks, which
-     * report nothing back. Either way every row keeps its own save control,
+     * "Save all". Chromium gets a folder picked once with every file written
+     * directly and success known per file; everywhere else gets one download
+     * (a single file) or one stored ZIP (several), which report nothing back. Either way every row keeps its own save control,
      * and this only records what lib/save/ tells it -- it never claims a file
      * arrived that it doesn't have a "written" or "sent" outcome for.
      */
@@ -517,6 +518,7 @@ export default function Compressor({ version }: { version: string }) {
     const anyPending = files.some(f => f.status === "pending");
     const doneRows = files.filter(f => f.status === "done" && f.resultBlob);
     const anyDone = doneRows.length > 0;
+    const nudgeCount = files.filter(f => f.status === "done" && f.webpOffer).length;
     const inFlight = files.filter(f => f.status === "queued" || f.status === "processing").length;
     const totalOriginal = doneRows.reduce((n, f) => n + (f.originalSize ?? f.file.size), 0);
     const totalResult = doneRows.reduce((n, f) => n + (f.newSize ?? 0), 0);
@@ -591,6 +593,9 @@ export default function Compressor({ version }: { version: string }) {
         const failed = lastBatch.results.filter(r => r.outcome === "failed").length;
         const ok = lastBatch.results.length - failed;
         if (lastBatch.mode === "cancelled") return "Save cancelled";
+        if (lastBatch.mode === "zip") {
+            return `${ok} ${ok === 1 ? "file" : "files"} sent to downloads as ${lastBatch.archive}`;
+        }
         const where = lastBatch.mode === "directory" ? `to ${folder?.name ?? "folder"}` : "to downloads";
         return `${ok} ${ok === 1 ? "file" : "files"} saved ${where}${failed ? ` · ${failed} failed` : ""}`;
     })();
@@ -598,8 +603,8 @@ export default function Compressor({ version }: { version: string }) {
     // Below lg the page simply flows and scrolls. From lg up it is the ~1120x740
     // window the design describes, with the list and panel scrolling inside.
     return (
-        <div className="flex min-h-screen items-center justify-center bg-ground lg:p-6">
-            <div className="flex min-h-screen w-full max-w-[1120px] flex-col bg-ground lg:h-[min(740px,calc(100vh-48px))] lg:min-h-0 lg:overflow-hidden lg:rounded-xl lg:border lg:border-line">
+        <div className="app-shell flex min-h-screen items-center justify-center bg-ground lg:p-6">
+            <div className="app-card flex min-h-screen w-full max-w-[1120px] flex-col bg-ground lg:h-[min(740px,calc(100vh-48px))] lg:min-h-0 lg:overflow-hidden lg:rounded-xl lg:border lg:border-line">
 
                 {/* Header */}
                 <header className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-line px-6 py-3">
@@ -676,7 +681,8 @@ export default function Compressor({ version }: { version: string }) {
 
                     {/* Settings panel */}
                     <aside className="flex w-full flex-shrink-0 flex-col border-t border-line bg-surface p-5 lg:w-[320px] lg:border-l lg:border-t-0">
-                        <div className="flex min-h-0 flex-1 flex-col gap-6 lg:overflow-y-auto">
+                        {/* -m-1 p-1: room inside the scroll box so focus rings on the edge controls aren't clipped. */}
+                        <div className="-m-1 flex min-h-0 flex-1 flex-col gap-6 p-1 lg:overflow-y-auto">
                             <section>
                                 <h2 className="label-mono mb-3 text-text-muted">Compression</h2>
                                 <PresetSelector
@@ -730,7 +736,7 @@ export default function Compressor({ version }: { version: string }) {
                                         label="Choose folder"
                                         hint={canPickFolder
                                             ? (folder ? "Finished files are written here." : "Pick a folder and finished files save there. Otherwise use Save all.")
-                                            : "This browser can't write to a folder, so files download instead."}
+                                            : "This browser can't write to a folder, so files download instead. Save all bundles several files into one ZIP."}
                                     />
                                     <div className="flex gap-2">
                                         <div
@@ -777,6 +783,11 @@ export default function Compressor({ version }: { version: string }) {
                                 : files.length ? "No supported files" : "No files"}
                     </p>
                     <div className="flex flex-shrink-0 items-center gap-4">
+                        {nudgeCount > 0 && (
+                            <Button variant="quiet" size="sm" onClick={() => convertToWebp()}>
+                                Convert all to WebP
+                            </Button>
+                        )}
                         {anyDone && inFlight === 0 && !folder && (
                             <Button variant="quiet" size="sm" onClick={() => { void downloadAll(); }}>Save all</Button>
                         )}

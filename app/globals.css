@@ -157,3 +157,32 @@ body {
         opacity: 0.6;
     }
 }
+
+/*
+ * Installed PWA (display-mode: standalone): the OS window is already the frame,
+ * so the app fills it -- no outer padding, no centred 1120x740 card, no border
+ * or rounding. The browser-tab layout (Tailwind's lg: rules on .app-shell and
+ * .app-card) is untouched. Plain unlayered CSS so it beats the utility layer.
+ * Below lg the card keeps flowing and scrolling; the fixed height is lg-only.
+ */
+@media (display-mode: standalone) {
+    .app-shell {
+        padding: 0;
+        align-items: stretch;
+    }
+    .app-card {
+        max-width: none;
+        border: 0;
+        border-radius: 0;
+    }
+}
+
+@media (display-mode: standalone) and (min-width: 1024px) {
+    .app-shell {
+        min-height: 100dvh;
+    }
+    .app-card {
+        height: 100dvh;
+        min-height: 0;
+    }
+}

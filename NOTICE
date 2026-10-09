@@ -87,5 +87,9 @@ Sprint 3.1, is no longer shipped.)
 Codec packages from the [jSquash](https://github.com/jamsinclair/jSquash)
 project are Apache-2.0, repackaged from Google's Squoosh (Apache-2.0).
 
+**fflate** v0.8.3 — <https://github.com/101arrowz/fflate>
+MIT, Copyright (c) 2026 Arjun Barrett. Builds the stored (level 0) ZIP that
+"Save all" downloads in browsers without a folder picker. Loaded only on that path.
+
 Remaining runtime and build dependencies are MIT or Apache-2.0; see
 `package-lock.json` for the resolved set.

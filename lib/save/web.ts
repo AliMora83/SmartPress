@@ -77,7 +77,7 @@ async function saveAllToDirectory(
 }
 
 /**
- * Fallback for everything else: staggered anchor clicks. Chained rather than
+ * Single-file fallback: one anchor click. Chained rather than
  * `setTimeout(fn, i * 300)` scheduled up front -- a backgrounded tab coalesces
  * those timers and fires every click at once. The browser reports nothing
  * back, so "sent" is the honest ceiling for this path, not "written".
@@ -90,6 +90,62 @@ async function saveAllSequentially(items: SaveItem[]): Promise<SaveAllResult> {
         results.push({ filename: items[i].filename, outcome: "sent" });
     }
     return { mode: "sequential", results };
+}
+
+/** `smartpress_2026-10-09-1432.zip`, local time. */
+function zipName(now = new Date()): string {
+    const p = (n: number) => String(n).padStart(2, "0");
+    const stamp = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}`;
+    return `smartpress_${stamp}.zip`;
+}
+
+/** Two rows can share an output name (same file added twice); a ZIP entry name must be unique. */
+function uniqueEntryNames(items: SaveItem[]): string[] {
+    const seen = new Set<string>();
+    return items.map(({ filename }) => {
+        let name = filename;
+        for (let n = 2; seen.has(name); n++) {
+            const dot = filename.lastIndexOf(".");
+            name = dot > 0 ? `${filename.slice(0, dot)} (${n})${filename.slice(dot)}` : `${filename} (${n})`;
+        }
+        seen.add(name);
+        return name;
+    });
+}
+
+/**
+ * No folder picker and more than one file: sequential anchor clicks lose files
+ * (Safari drops all but the first couple of rapid downloads), so the batch goes
+ * out as one archive. Level 0 -- store only -- because the contents are already
+ * compressed and deflating them again costs time for nothing. `fflate` is
+ * imported here, not at the top, so it loads only when this path runs.
+ */
+async function saveAllAsZip(items: SaveItem[]): Promise<SaveAllResult> {
+    const { zipSync } = await import("fflate");
+    const names = uniqueEntryNames(items);
+    const entries: Record<string, Uint8Array> = {};
+    for (let i = 0; i < items.length; i++) {
+        entries[names[i]] = new Uint8Array(await items[i].blob.arrayBuffer());
+    }
+    const archive = zipName();
+    const bytes = zipSync(entries, { level: 0 });
+    triggerAnchorDownload(new Blob([bytes as unknown as BlobPart], { type: "application/zip" }), archive);
+    return {
+        mode: "zip",
+        archive,
+        results: items.map(i => ({ filename: i.filename, outcome: "sent" as const })),
+    };
+}
+
+/** Everything without a working folder picker: one file downloads directly, several as a ZIP. */
+async function saveAllFallback(items: SaveItem[]): Promise<SaveAllResult> {
+    if (items.length < 2) return await saveAllSequentially(items);
+    try {
+        return await saveAllAsZip(items);
+    } catch {
+        // Archive build failed (e.g. out of memory): staggered downloads beat nothing.
+        return await saveAllSequentially(items);
+    }
 }
 
 function hasDirectoryPicker(): boolean {
@@ -112,9 +168,9 @@ export const webSaver: Saver = {
                 // The picker call itself failed for some reason other than the
                 // user cancelling (caught above) -- fall back rather than
                 // dead-end the button.
-                return await saveAllSequentially(items);
+                return await saveAllFallback(items);
             }
         }
-        return await saveAllSequentially(items);
+        return await saveAllFallback(items);
     },
 };

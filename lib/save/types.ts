@@ -33,8 +33,10 @@ export interface SaveAllOptions {
 
 export interface SaveAllResult {
     /** Which strategy actually ran, so the UI can word the notice correctly. */
-    mode: "directory" | "sequential" | "cancelled";
+    mode: "directory" | "sequential" | "zip" | "cancelled";
     results: SaveOneResult[];
+    /** Name of the archive handed to the browser. Set only when mode is "zip". */
+    archive?: string;
 }
 
 /**
