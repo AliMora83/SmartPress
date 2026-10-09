@@ -681,7 +681,8 @@ export default function Compressor({ version }: { version: string }) {
 
                     {/* Settings panel */}
                     <aside className="flex w-full flex-shrink-0 flex-col border-t border-line bg-surface p-5 lg:w-[320px] lg:border-l lg:border-t-0">
-                        <div className="flex min-h-0 flex-1 flex-col gap-6 lg:overflow-y-auto">
+                        {/* -m-1 p-1: room inside the scroll box so focus rings on the edge controls aren't clipped. */}
+                        <div className="-m-1 flex min-h-0 flex-1 flex-col gap-6 p-1 lg:overflow-y-auto">
                             <section>
                                 <h2 className="label-mono mb-3 text-text-muted">Compression</h2>
                                 <PresetSelector
