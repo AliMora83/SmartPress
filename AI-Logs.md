@@ -5,6 +5,21 @@
 
 ---
 
+## 2026-10-09 | Sprint 3.0.1 — polish | Claude (Sonnet 5.5)
+
+Branch `sprint/3.0.1-polish` off `main`. One commit per task.
+
+- **Convert all to WebP.** Footer button, shown only while a done row carries a WebP offer. Shares the per-row swap in `convertToWebp`; other rows untouched.
+- **Safari save fix.** Without `showDirectoryPicker`, Save all with >1 file builds one stored (level 0) ZIP, `smartpress_<YYYY-MM-DD-HHmm>.zip`; one file still downloads directly. Adds **`fflate` 0.8.3** (MIT, approved), imported lazily on that path, NOTICE entry added. This reverses the earlier "ZIP is cancelled" note in CLAUDE.md, updated to match. Verified against the built `out/` with the picker removed: one download, 4 stored entries.
+- **Installed PWA.** `display-mode: standalone` removes the outer padding, centring, border, radius and max-width; browser-tab layout unchanged.
+- **Keyboard.** Presets are a `radiogroup` (roving tabindex, arrows wrap, Home/End); settings scroll box padded so focus rings aren't clipped. Drop zone already handled Enter/Space. Tab order follows DOM: toolbar, drop zone, rows, settings, Start, footer.
+- **Cleanup.** Removed `Smart_icon.png` and the five Next.js boilerplate SVGs (no references). `check-export.mjs` had allowlisted `Smart_icon.png`; that exemption was removed too.
+- **Version 3.0.1.** `package.json` is the only source; the wordmark tag and `/licenses` read it.
+- **Service worker.** The cache name hashes every precached path and its bytes, and the build ID sits in a precached path, so any rebuild changes it. Measured: deployed 3.0.0 `smartpress-732dfbb6bdb9`, pre-bump build `…934d0f0be5b0`, post-bump build `…94acab2d9574`.
+- **Output.** `out/` 7.68 MB of files, 9.59 MB by `du` (3.0.0: 9.67 MB).
+
+---
+
 ## 2026-10-06 | Sprint 3.2b — PWA + offline | Claude (Sonnet 5.5)
 
 Branch `sprint/3.2b-pwa` (off main after #13 merged). Installable, and fully usable offline after one visit.
