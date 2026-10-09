@@ -31,6 +31,7 @@
  */
 import type { EncodeOptions } from "./types";
 import { resolveAssetUrl } from "./loader";
+import { applyPdfjsShims, pdfjsWorkerSrc } from "./pdfjsCompat";
 
 const FLATTEN_SCALE = 150 / 72; // 150dpi, matching the Sprint 2.1 spike
 
@@ -94,11 +95,13 @@ class NoopFilterFactory {
 }
 
 export async function flattenPdf(bytes: Uint8Array, options: EncodeOptions): Promise<Uint8Array> {
+    // The legacy build (see pdfjsCompat.ts), with its one shim applied before it loads.
+    applyPdfjsShims();
     const [pdfjs, pdfLib] = await Promise.all([
-        import("pdfjs-dist"),
+        import("pdfjs-dist/legacy/build/pdf.mjs"),
         import("pdf-lib"),
     ]);
-    pdfjs.GlobalWorkerOptions.workerSrc = resolveAssetUrl("/pdfjs/pdf.worker.min.mjs");
+    pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorkerSrc(resolveAssetUrl("/pdfjs/pdf.worker.min.mjs"));
 
     const doc = await pdfjs.getDocument({
         data: bytes,
@@ -138,6 +141,14 @@ export async function flattenPdf(bytes: Uint8Array, options: EncodeOptions): Pro
         const img = await outDoc.embedJpg(jpegBytes);
         const outPage = outDoc.addPage([viewport.width, viewport.height]);
         outPage.drawImage(img, { x: 0, y: 0, width: viewport.width, height: viewport.height });
+
+        // Release this page's resources and pdf.js's shared caches before the next
+        // page. Besides bounding memory on long documents, it is load-bearing in the
+        // system WKWebView on macOS 13: without it, a later page that reuses
+        // resources from an earlier one never finishes rendering (page 3 of a 7-page
+        // PDF hung for minutes). Chrome's output is unaffected.
+        page.cleanup();
+        await doc.cleanup();
     }
 
     return outDoc.save();
