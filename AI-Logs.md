@@ -5,6 +5,18 @@
 
 ---
 
+## 2026-10-09 | Fix 3.0.3 — decode orientation fallback | Claude (Sonnet 5.5)
+
+Branch `fix/3.0.3-decode-orientation` off `main`. Touches `lib/codecs/decode.ts` and a new `lib/codecs/exifOrientation.ts` only (plus version).
+
+- **Problem.** The system WKWebView on macOS 13.7 (what Tauri uses) throws `TypeError` for `createImageBitmap(file, { imageOrientation: "from-image" })`, so every wasm-backed image codec failed there. Found in the 3.3a spike. Any Safari with the same limitation would fail the same way on the web build.
+- **Fix.** `from-image` is still tried first; Chrome always succeeds, so its path is unchanged. On `TypeError` only, plain `createImageBitmap(file)` is used, once-per-realm probed with an embedded 2x1 EXIF-6 JPEG: if it comes back 1x2 the engine auto-orients and the bitmap is used as-is; if 2x1, the JPEG's EXIF orientation is read from the bytes and all 8 transforms are applied on an `OffscreenCanvas`. The probe result and the "from-image unsupported" flag are cached. Works on main thread and in workers (no DOM use).
+- **Verified.** Chrome, built `out/`: all 27 existing fixture/preset outputs byte-identical to the pre-fix build on a second full run. The first run had one 2-byte difference on `Trading Rapid Implementation.pdf` with flatten on (383456 vs 383458); it did not reproduce in 3 isolated runs on either build nor in the second full run, and the flatten path does not call `decode()`, so it is a rare PDF-flatten nondeterminism, not this change. Orientation: `ORIENT-6/3/8` fixtures come out with the right size and pixels (mean abs diff 0.1-0.3 vs a pre-rotated reference, i.e. JPEG noise). The manual transform path, which Chrome never takes, was checked separately: for all 8 orientations the transform of the raw bitmap equals Chrome's `from-image` result exactly (diff 0). In the Tauri app the same fixtures are correct; there plain `createImageBitmap` auto-orients (probe → 1200x1167 for ORIENT-6), so the manual path is not used.
+- **PDF side finding.** `pdf.ts` swallows per-image decode errors (`catch { return; }`), which is why the first spike's PDF runs returned the original bytes: the same decode failure, hidden. Fixed by this change.
+- **Version 3.0.3.** SW cache for this build `smartpress-387aa995eb9d`. `out/` 7.69 MB of files, 9.60 MB by `du`.
+
+---
+
 ## 2026-10-09 | Sprint 3.0.2 — Save all WebP | Claude (Sonnet 5.5)
 
 Branch `sprint/3.0.2-save-webp` off `main` (3.0.1 merged).
