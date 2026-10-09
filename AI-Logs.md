@@ -5,6 +5,18 @@
 
 ---
 
+## 2026-10-09 | Sprint 3.0.2 — Save all WebP | Claude (Sonnet 5.5)
+
+Branch `sprint/3.0.2-save-webp` off `main` (3.0.1 merged).
+
+- **Finding.** Converting a row only swaps its in-memory result. The folder auto-write fires once, when a batch started by Start finishes, so after a convert the folder holds `smartpress_x.png` and nothing for the WebP.
+- **Save all WebP.** Footer button next to Save all, shown while any converted row is unsaved. It saves only converted rows, as `smartpress_<name>.webp`, through `lib/save/web.ts` (no fork). Folder: written there, with the permission re-requested if lapsed and falling back to the no-picker path if denied. No picker: one file downloads directly, two or more become `smartpress_webp_<YYYY-MM-DD-HHmm>.zip` (lazy fflate, level 0).
+- **No double writes.** Rows already saved are skipped, and the folder auto-write after Start now skips saved rows. A row's `saved` mark is what the button reads, so it hides once everything converted is saved.
+- **Version 3.0.2.** `package.json` is the only source. SW cache name `smartpress-06a080335956` for this build; every rebuild changes it (build ID is in a precached path).
+- **Output.** `out/` 7.68 MB of files, 9.60 MB by `du`.
+
+---
+
 ## 2026-10-09 | Sprint 3.0.1 — polish | Claude (Sonnet 5.5)
 
 Branch `sprint/3.0.1-polish` off `main`. One commit per task.
