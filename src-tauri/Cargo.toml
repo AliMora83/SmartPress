@@ -1,0 +1,29 @@
+[package]
+name = "smartpress"
+version = "0.1.0"
+description = "SmartPress desktop shell"
+authors = []
+license = "GPL-3.0-or-later"
+repository = "https://github.com/AliMora83/SmartPress"
+edition = "2024"
+rust-version = "1.90"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "smartpress_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.1", features = [] }
+
+[features]
+# Test hooks (env-driven pickers, delayed drop). Never enabled in a release build.
+e2e = []
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+tauri = { version = "2.12.1", features = ["devtools"] }
+tauri-plugin-dialog = "2.8.1"
+tauri-plugin-fs = "2.6.0"
+tauri-plugin-opener = "2.7.0"

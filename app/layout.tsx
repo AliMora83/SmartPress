@@ -22,7 +22,8 @@ export const metadata: Metadata = {
   icons: {
     icon: "/favicon.ico",
   },
-  manifest: "/manifest.webmanifest",
+  // The desktop shell is not an installable PWA: no manifest there.
+  ...(process.env.NEXT_PUBLIC_TARGET !== "desktop" && { manifest: "/manifest.webmanifest" }),
 };
 
 // bg-ground from docs/design-system/tokens.json; matches the manifest.
