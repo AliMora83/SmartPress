@@ -190,13 +190,14 @@ boundary was settled in Sprint 1.4, specifically so the desktop build in Sprint 
 can write files straight to disk through the same interface, with nothing above
 `lib/save/` needing to change.
 
-`downloadAll()` is the permanent web delivery path — **ZIP is cancelled.** Chromium
-gets `showDirectoryPicker()`: one folder picked once, every file written through
+`downloadAll()` is the permanent web delivery path. Chromium gets
+`showDirectoryPicker()`: one folder picked once, every file written through
 `FileSystemWritableFileStream`, so success is known per file, not guessed at. Every
-other browser falls back to staggered anchor clicks, which report nothing back — that
-fallback is not a stopgap for a ZIP sprint that no longer exists, it is what those
-browsers get indefinitely. Either path leaves every row's own Download button visible,
-because neither path can guarantee a file actually landed.
+other browser downloads a single file directly, or — from 3.0.1 — several files as one
+stored (level 0) ZIP named `smartpress_<YYYY-MM-DD-HHmm>.zip`, built with `fflate`
+imported lazily on that path only. (Staggered anchor clicks lost files in Safari, which
+is why ZIP is no longer cancelled.) Neither fallback reports back, so "sent" is the
+honest ceiling and every row keeps its own save button.
 
 ## Working rules
 

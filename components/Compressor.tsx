@@ -440,10 +440,9 @@ export default function Compressor({ version }: { version: string }) {
     }, [toSaveItem]);
 
     /**
-     * "Download All", permanent now that ZIP is cancelled. Chromium gets a
-     * folder picked once with every file written directly and success known
-     * per file; everywhere else falls back to staggered anchor clicks, which
-     * report nothing back. Either way every row keeps its own save control,
+     * "Save all". Chromium gets a folder picked once with every file written
+     * directly and success known per file; everywhere else gets one download
+     * (a single file) or one stored ZIP (several), which report nothing back. Either way every row keeps its own save control,
      * and this only records what lib/save/ tells it -- it never claims a file
      * arrived that it doesn't have a "written" or "sent" outcome for.
      */
@@ -594,6 +593,9 @@ export default function Compressor({ version }: { version: string }) {
         const failed = lastBatch.results.filter(r => r.outcome === "failed").length;
         const ok = lastBatch.results.length - failed;
         if (lastBatch.mode === "cancelled") return "Save cancelled";
+        if (lastBatch.mode === "zip") {
+            return `${ok} ${ok === 1 ? "file" : "files"} sent to downloads as ${lastBatch.archive}`;
+        }
         const where = lastBatch.mode === "directory" ? `to ${folder?.name ?? "folder"}` : "to downloads";
         return `${ok} ${ok === 1 ? "file" : "files"} saved ${where}${failed ? ` · ${failed} failed` : ""}`;
     })();
@@ -733,7 +735,7 @@ export default function Compressor({ version }: { version: string }) {
                                         label="Choose folder"
                                         hint={canPickFolder
                                             ? (folder ? "Finished files are written here." : "Pick a folder and finished files save there. Otherwise use Save all.")
-                                            : "This browser can't write to a folder, so files download instead."}
+                                            : "This browser can't write to a folder, so files download instead. Save all bundles several files into one ZIP."}
                                     />
                                     <div className="flex gap-2">
                                         <div
