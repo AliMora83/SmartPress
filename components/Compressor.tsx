@@ -389,11 +389,12 @@ export default function Compressor({ version }: { version: string }) {
      * Swap a PNG row's output for the WebP the nudge offered. Replaces rather
      * than adds: the row has one output, and it is now the WebP under a .webp
      * name. `saved` is cleared because whatever was handed off before is no
-     * longer this row's result.
+     * longer this row's result. The one swap shared by the per-row Convert and
+     * Convert all, so the two cannot drift.
      */
-    const convertToWebp = useCallback((id: string) => {
+    const convertToWebp = useCallback((id?: string) => {
         setFiles(prev => prev.map(f => {
-            if (f.id !== id || !f.webpOffer) return f;
+            if ((id !== undefined && f.id !== id) || f.status !== "done" || !f.webpOffer) return f;
             return {
                 ...f,
                 resultBlob: f.webpOffer.blob,
@@ -405,6 +406,7 @@ export default function Compressor({ version }: { version: string }) {
                 saved: undefined,
             };
         }));
+        setLastBatch(null);
     }, []);
 
     const compressAll = useCallback(() => {
@@ -517,6 +519,7 @@ export default function Compressor({ version }: { version: string }) {
     const anyPending = files.some(f => f.status === "pending");
     const doneRows = files.filter(f => f.status === "done" && f.resultBlob);
     const anyDone = doneRows.length > 0;
+    const nudgeCount = files.filter(f => f.status === "done" && f.webpOffer).length;
     const inFlight = files.filter(f => f.status === "queued" || f.status === "processing").length;
     const totalOriginal = doneRows.reduce((n, f) => n + (f.originalSize ?? f.file.size), 0);
     const totalResult = doneRows.reduce((n, f) => n + (f.newSize ?? 0), 0);
@@ -777,6 +780,11 @@ export default function Compressor({ version }: { version: string }) {
                                 : files.length ? "No supported files" : "No files"}
                     </p>
                     <div className="flex flex-shrink-0 items-center gap-4">
+                        {nudgeCount > 0 && (
+                            <Button variant="quiet" size="sm" onClick={() => convertToWebp()}>
+                                Convert all to WebP
+                            </Button>
+                        )}
                         {anyDone && inFlight === 0 && !folder && (
                             <Button variant="quiet" size="sm" onClick={() => { void downloadAll(); }}>Save all</Button>
                         )}
