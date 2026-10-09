@@ -603,8 +603,8 @@ export default function Compressor({ version }: { version: string }) {
     // Below lg the page simply flows and scrolls. From lg up it is the ~1120x740
     // window the design describes, with the list and panel scrolling inside.
     return (
-        <div className="flex min-h-screen items-center justify-center bg-ground lg:p-6">
-            <div className="flex min-h-screen w-full max-w-[1120px] flex-col bg-ground lg:h-[min(740px,calc(100vh-48px))] lg:min-h-0 lg:overflow-hidden lg:rounded-xl lg:border lg:border-line">
+        <div className="app-shell flex min-h-screen items-center justify-center bg-ground lg:p-6">
+            <div className="app-card flex min-h-screen w-full max-w-[1120px] flex-col bg-ground lg:h-[min(740px,calc(100vh-48px))] lg:min-h-0 lg:overflow-hidden lg:rounded-xl lg:border lg:border-line">
 
                 {/* Header */}
                 <header className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-line px-6 py-3">
