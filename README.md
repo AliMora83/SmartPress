@@ -107,7 +107,7 @@ scripts/             Post-build prune, service-worker injection, export guard
 
 - **AVIF output is off.** The encoder hangs the production build, and re-enabling it is a one-flag change once that's fixed.
 - **No PDF flatten in the desktop app** on macOS 13. Text is always kept there. The web app flattens normally.
-- Older Safari can't save into a chosen folder, so files arrive as a ZIP.
+- Saving into a chosen folder needs a Chromium browser (Chrome, Edge). Safari and Firefox get a single ZIP instead.
 
 ## Licence
 
