@@ -19,6 +19,7 @@ import {
 import type { Format, PngMode, Preset } from "@/lib/codecs";
 import { appError, classify, MAX_INPUT_BYTES, type AppError } from "@/lib/errors";
 import { useServiceWorkerUpdate } from "@/lib/pwa";
+import { loadNative } from "@/lib/desktop/load";
 import { getSaver } from "@/lib/save";
 import type { SaveAllOptions, SaveAllResult, SaveItem } from "@/lib/save/types";
 
@@ -76,8 +77,8 @@ function isAcceptedFile(file: File): boolean {
 /**
  * Desktop target (Tauri, Sprint 3.3b): real file paths, so "Same as source" works and
  * saving goes through the native Saver. Everything desktop-only is loaded with a
- * dynamic import behind a literal `process.env.NEXT_PUBLIC_TARGET === "desktop"`
- * test, which the bundler folds away on web -- keep those tests inline.
+ * dynamic import (see lib/desktop/load.ts and lib/save/index.ts: a positive literal
+ * `process.env.NEXT_PUBLIC_TARGET === "desktop"` test, which the bundler folds away on web).
  */
 const IS_DESKTOP = process.env.NEXT_PUBLIC_TARGET === "desktop";
 const ACCEPTED_LABEL = ACCEPTED_FORMATS
@@ -294,7 +295,7 @@ export default function Compressor({ version }: { version: string }) {
     /** Add files: the native dialog on desktop (it returns paths), the hidden input on web. */
     const openPicker = useCallback(async () => {
         if (process.env.NEXT_PUBLIC_TARGET === "desktop") {
-            const native = await import("@/lib/desktop/native");
+            const native = await loadNative();
             const items = await native.pickFiles();
             handleFileSelect(items.map(i => i.file), items.map(i => i.path));
             return;
@@ -308,7 +309,7 @@ export default function Compressor({ version }: { version: string }) {
         let dead = false;
         const un: (() => void)[] = [];
         (async () => {
-            const native = await import("@/lib/desktop/native");
+            const native = await loadNative();
             const a = await native.onDrop(items => handleFileSelect(items.map(i => i.file), items.map(i => i.path)));
             const b = await native.onDragHover(setDragActive);
             if (dead) { a(); b(); } else un.push(a, b);
@@ -474,7 +475,7 @@ export default function Compressor({ version }: { version: string }) {
     /** Desktop: the native folder dialog. Choosing a folder makes it the destination. */
     const pickDesktopFolder = useCallback(async (): Promise<string | null> => {
         if (process.env.NEXT_PUBLIC_TARGET !== "desktop") return null;
-        const native = await import("@/lib/desktop/native");
+        const native = await loadNative();
         const path = await native.pickFolder();
         if (path) { setDesktopFolder(path); setSaveTo("folder"); destRef.current = { saveTo: "folder", desktopFolder: path }; }
         return path;
@@ -603,7 +604,7 @@ export default function Compressor({ version }: { version: string }) {
     /** Desktop: reveal the last saved file in Finder. */
     const revealInFinder = async () => {
         if (process.env.NEXT_PUBLIC_TARGET !== "desktop" || !revealPath) return;
-        await (await import("@/lib/desktop/native")).reveal(revealPath);
+        await (await loadNative()).reveal(revealPath);
     };
     const nudgeCount = files.filter(f => f.status === "done" && f.webpOffer).length;
     const inFlight = files.filter(f => f.status === "queued" || f.status === "processing").length;
