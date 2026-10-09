@@ -177,6 +177,8 @@ export default function Compressor({ version }: { version: string }) {
     const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
     /** Outcome of the last Download All, for the notice. lib/save/ produced it. */
     const [lastBatch, setLastBatch] = useState<SaveAllResult | null>(null);
+    /** Whether that outcome came from Save all WebP, so the notice can say "WebP". */
+    const [lastBatchWebp, setLastBatchWebp] = useState(false);
     /**
      * The clock, read only inside the effect below and never during render --
      * render must be a pure function of props/state, and `Date.now()` isn't.
@@ -446,11 +448,20 @@ export default function Compressor({ version }: { version: string }) {
      * and this only records what lib/save/ tells it -- it never claims a file
      * arrived that it doesn't have a "written" or "sent" outcome for.
      */
-    const downloadAll = useCallback(async (directory?: FileSystemDirectoryHandle) => {
-        const ready = filesRef.current.filter(f => f.status === "done" && f.resultBlob);
+    const downloadAll = useCallback(async (directory?: FileSystemDirectoryHandle, mode: "all" | "webp" | "unsaved" = "all") => {
+        const webpOnly = mode === "webp";
+        // "webp": only rows swapped to WebP that haven't been written yet (Save all,
+        // a folder batch or a row's own save marks the row `saved`), so a converted
+        // file is never written twice. "unsaved": the folder auto-write after Start,
+        // which must not rewrite what an earlier save already delivered.
+        const ready = filesRef.current.filter(f => f.status === "done" && f.resultBlob
+            && (mode === "all" || !f.saved) && (!webpOnly || f.convertedTo === "webp"));
         if (!ready.length) return;
         setLastBatch(null);
-        const result = await webSaver.saveAll(ready.map(toSaveItem), { directory });
+        const result = await webSaver.saveAll(ready.map(toSaveItem), {
+            directory,
+            archivePrefix: webpOnly ? "smartpress_webp" : undefined,
+        });
         const outcomeByName = new Map(result.results.map(r => [r.filename, r.outcome]));
         setFiles(prev => prev.map(f => {
             if (f.status !== "done" || !f.resultBlob) return f;
@@ -461,6 +472,7 @@ export default function Compressor({ version }: { version: string }) {
             // just failed it.
             return { ...f, saved: outcome === "failed" ? undefined : outcome };
         }));
+        setLastBatchWebp(webpOnly);
         setLastBatch(result);
     }, [toSaveItem]);
 
@@ -493,7 +505,7 @@ export default function Compressor({ version }: { version: string }) {
         batchRef.current = false;
         // Deferred a tick: downloadAll() resets the previous save notice first,
         // and setState must not run synchronously in an effect body.
-        if (folder) queueMicrotask(() => { void downloadAll(folder); });
+        if (folder) queueMicrotask(() => { void downloadAll(folder, "unsaved"); });
     }, [busy, folder, downloadAll]);
 
     const start = useCallback(() => {
@@ -518,6 +530,7 @@ export default function Compressor({ version }: { version: string }) {
     const anyPending = files.some(f => f.status === "pending");
     const doneRows = files.filter(f => f.status === "done" && f.resultBlob);
     const anyDone = doneRows.length > 0;
+    const webpToSave = files.filter(f => f.status === "done" && f.resultBlob && f.convertedTo === "webp" && !f.saved).length;
     const nudgeCount = files.filter(f => f.status === "done" && f.webpOffer).length;
     const inFlight = files.filter(f => f.status === "queued" || f.status === "processing").length;
     const totalOriginal = doneRows.reduce((n, f) => n + (f.originalSize ?? f.file.size), 0);
@@ -593,11 +606,10 @@ export default function Compressor({ version }: { version: string }) {
         const failed = lastBatch.results.filter(r => r.outcome === "failed").length;
         const ok = lastBatch.results.length - failed;
         if (lastBatch.mode === "cancelled") return "Save cancelled";
-        if (lastBatch.mode === "zip") {
-            return `${ok} ${ok === 1 ? "file" : "files"} sent to downloads as ${lastBatch.archive}`;
-        }
+        const noun = `${ok} ${lastBatchWebp ? "WebP " : ""}${ok === 1 ? "file" : "files"}`;
+        if (lastBatch.mode === "zip") return `${noun} sent to downloads as ${lastBatch.archive}`;
         const where = lastBatch.mode === "directory" ? `to ${folder?.name ?? "folder"}` : "to downloads";
-        return `${ok} ${ok === 1 ? "file" : "files"} saved ${where}${failed ? ` · ${failed} failed` : ""}`;
+        return `${noun} saved ${where}${failed ? ` · ${failed} failed` : ""}`;
     })();
 
     // Below lg the page simply flows and scrolls. From lg up it is the ~1120x740
@@ -786,6 +798,11 @@ export default function Compressor({ version }: { version: string }) {
                         {nudgeCount > 0 && (
                             <Button variant="quiet" size="sm" onClick={() => convertToWebp()}>
                                 Convert all to WebP
+                            </Button>
+                        )}
+                        {webpToSave > 0 && inFlight === 0 && (
+                            <Button variant="quiet" size="sm" onClick={() => { void downloadAll(folder ?? undefined, "webp"); }}>
+                                Save all WebP
                             </Button>
                         )}
                         {anyDone && inFlight === 0 && !folder && (
