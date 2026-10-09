@@ -82,9 +82,10 @@ service worker and no PWA manifest. The `e2e` Cargo feature (env-driven pickers 
 tests) is off in a normal build.
 
 **Known issues**
-- **PDF flatten (Keep PDF text selectable off) produces blank pages in the desktop app.** pdf.js
-  draws nothing in the macOS 13 system WebKit. It completes without error, so the output looks
-  valid. Levels 1-2 (the default) work. Use the web build for flatten.
+- **No PDF flatten in the desktop app.** pdf.js draws nothing in the macOS 13 system WebKit, so the
+  "Keep PDF text selectable" option is hidden there and text is always kept (levels 1-2). Every
+  target also has a blank-render guard: if a flatten produces only blank pages it is discarded and
+  the row says "Flattening failed". Use the web build for flatten.
 - JPEG output bytes differ from Chrome by up to about 1.5% (each engine decodes JPEG natively).
 
 **Parked:** Open with / right-click integration, format conversion, AVIF, auto-deploy, code

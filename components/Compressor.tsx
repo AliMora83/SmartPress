@@ -376,7 +376,8 @@ export default function Compressor({ version }: { version: string }) {
                     quality: PRESET_SCALE[settingsRef.current.preset],
                     pngMode: settingsRef.current.pngMode,
                     pngPreset: settingsRef.current.preset,
-                    keepTextSelectable: settingsRef.current.keepTextSelectable,
+                    // Desktop always keeps text: flatten is not offered there (pdf.js renders blank in its WebKit).
+                    keepTextSelectable: IS_DESKTOP ? true : settingsRef.current.keepTextSelectable,
                 },
                 onProgress: (progress, stage) => setFiles(prev => prev.map(f =>
                     f.id === id ? { ...f, status: "processing", progress, stage } : f)),
@@ -803,6 +804,7 @@ export default function Compressor({ version }: { version: string }) {
                                 </div>
                             </fieldset>
 
+                            {!IS_DESKTOP && (
                             <section>
                                 <h2 className="label-mono mb-3 text-text-muted">PDF</h2>
                                 <Choice
@@ -812,6 +814,7 @@ export default function Compressor({ version }: { version: string }) {
                                     hint="Off flattens each page to an image. Smaller, but text and links are lost."
                                 />
                             </section>
+                            )}
 
                             <fieldset>
                                 <legend className="label-mono mb-3 text-text-muted">Save to</legend>
