@@ -6,7 +6,7 @@
  * worker boundary -- the Blob goes in and the encoded bytes come out, which is
  * cheaper than transferring a 16 MB pixel buffer each way.
  */
-import { decode, toPlain } from "./decode";
+import { decodeFit, toPlain } from "./decode";
 import { isWorthKeeping } from "../compression";
 import { encodeDetailed } from "./index";
 import { webpAlternative } from "./webpNudge";
@@ -18,6 +18,13 @@ export type WorkerRequest = {
     format: Format;
     /** The abstract 0-10 scale plus any per-codec options. Curves live in quality.ts. */
     options: EncodeOptions;
+    /**
+     * Images only. Encode to this format instead of the input's own. Absent
+     * means "keep format". Ignored for PDF.
+     */
+    outputFormat?: Format;
+    /** Images only. Cap the longest side at this many pixels; never enlarges. Ignored for PDF. */
+    maxDimension?: number;
 };
 
 export type WorkerResponse =
@@ -27,6 +34,10 @@ export type WorkerResponse =
         pageCount?: number; pdfNote?: "signed" | "flatten-not-smaller" | "flatten-failed";
         png?: PngQualityReport;
         webp?: { bytes: ArrayBuffer; savedRatio: number };
+        /** The format `bytes` is actually in. */
+        format: Format;
+        /** Images only: output pixel size, and whether it was scaled down to get there. */
+        width?: number; height?: number; resized?: boolean;
     }
     | { id: string; type: "error"; error: string };
 
@@ -34,7 +45,7 @@ const post = (msg: WorkerResponse, transfer?: Transferable[]) =>
     (self as unknown as Worker).postMessage(msg, transfer ?? []);
 
 self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
-    const { id, file, format, options } = e.data;
+    const { id, file, format, options, outputFormat, maxDimension } = e.data;
     try {
         // PDF is not "decode pixels, encode pixels" -- it is its own pipeline
         // (cleanup, recompress embedded images, optionally flatten), entirely
@@ -54,6 +65,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
                 {
                     id, type: "done", bytes: buf, byteLength: result.bytes.byteLength,
                     decodeMs: 0, encodeMs: t1 - t0, pageCount: result.pageCount, pdfNote: result.note,
+                    format: "pdf",
                 },
                 [buf],
             );
@@ -62,14 +74,15 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 
         post({ id, type: "progress", stage: "decoding", progress: 5 });
         const t0 = performance.now();
-        const image = await decode(file);
+        const { image, resized } = await decodeFit(file, maxDimension);
+        const target = outputFormat ?? format;
         const t1 = performance.now();
 
         // These encoders expose no progress callback, so progress is
         // stage-based rather than continuous. Encoding is the long pole
         // (~4.9 s for a 1 MB PNG), so the UI shows it as in-flight from here.
         post({ id, type: "progress", stage: "encoding", progress: 25 });
-        const { bytes: out, png } = await encodeDetailed(toPlain(image), format, options);
+        const { bytes: out, png } = await encodeDetailed(toPlain(image), target, options);
         const t2 = performance.now();
 
         const buf = out.buffer.slice(
@@ -81,9 +94,10 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         // preset's minimum -- a skipped file has no result to compare against,
         // and lossless has no quality tier to match. The baseline is what the
         // user will actually get, which is the original when the PNG encode
-        // wasn't worth keeping.
+        // wasn't worth keeping. Keyed on the output format: a PNG being
+        // converted already is the WebP, so there is nothing left to offer.
         let webp: { bytes: ArrayBuffer; savedRatio: number } | undefined;
-        if (format === "png" && png && !png.skipped) {
+        if (target === "png" && png && !png.skipped) {
             const baseline = isWorthKeeping(file.size, out.byteLength) ? out.byteLength : file.size;
             const alt = await webpAlternative(toPlain(image), png.preset, baseline);
             if (alt) {
@@ -95,7 +109,10 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
             }
         }
         post(
-            { id, type: "done", bytes: buf, byteLength: out.byteLength, decodeMs: t1 - t0, encodeMs: t2 - t1, png, webp },
+            {
+                id, type: "done", bytes: buf, byteLength: out.byteLength, decodeMs: t1 - t0, encodeMs: t2 - t1, png, webp,
+                format: target, width: image.width, height: image.height, resized,
+            },
             transfer,
         );
     } catch (err) {

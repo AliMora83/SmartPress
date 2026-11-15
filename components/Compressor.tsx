@@ -26,33 +26,19 @@ import type { SaveAllOptions, SaveAllResult, SaveItem } from "@/lib/save/types";
 /**
  * What the dropzone accepts, behind two independent gates.
  *
- * **Gate 1 -- product scope.** Phase 1 hands back the format it was given, so a
- * format is only worth accepting if we would return it unchanged in kind.
- * Conversion is Sprint 2.4. WebP is the reason this list exists rather than
- * being derived: `CAPABILITIES.webp.available` is `true` and WebP encodes
- * correctly today, but exposing it needs a conversion UI, filename handling and
- * a transparency decision, so it stays out until 2.4. Deriving purely from
- * `available` would put it in the dropzone tomorrow.
+ * **Gate 1 -- product scope.** The formats SmartPress offers to take in. WebP
+ * joined in 3.2.0 along with the Output setting: it always encoded correctly,
+ * and it stayed out only until there was a place to choose WebP as an output.
  *
  * **Gate 2 -- capability.** Whatever survives gate 1 is still filtered on the
  * descriptor, so a format the build cannot encode can never be offered even if
- * someone adds it to the list above. That is the gate that keeps AVIF out today.
- *
- * **Restoring AVIF in Sprint 2.2 is therefore two edits, deliberately:**
- *   1. `available: true` on `CAPABILITIES.avif` -- after fixing the Turbopack
- *      build stall, not instead of fixing it (see `encoders.ts`).
- *   2. add `"avif"` to this list, which is the statement that Phase 2 wants it
- *      offered to users.
- *
- * They are separate because they answer different questions: *can* we encode
- * it, and *should* we offer it. Collapsing them into one flag would take WebP
- * with it.
- *
- * PDF joined this list in Sprint 2.1. It doesn't need a capability gate the
- * way AVIF did -- `lib/codecs/pdf.ts` has no build-time failure mode -- so
- * it's simply always on once added here.
+ * someone adds it to the list. That is the gate that keeps AVIF out today:
+ * restoring it is `available: true` on `CAPABILITIES.avif` (after fixing the
+ * Turbopack build stall, see `encoders.ts`) plus adding `"avif"` here. They are
+ * separate because they answer different questions: *can* we encode it, and
+ * *should* we offer it.
  */
-const PHASE1_INPUT_FORMATS: Format[] = ["jpeg", "png", "pdf"];
+const PHASE1_INPUT_FORMATS: Format[] = ["jpeg", "png", "webp", "pdf"];
 const ACCEPTED_FORMATS = PHASE1_INPUT_FORMATS.filter(f => CAPABILITIES[f].available !== false);
 const ACCEPTED_TYPES = ACCEPTED_FORMATS.map(f => CAPABILITIES[f].mimeType);
 /**
@@ -61,7 +47,7 @@ const ACCEPTED_TYPES = ACCEPTED_FORMATS.map(f => CAPABILITIES[f].mimeType);
  * the OS reports with no MIME type), so both gates must pass.
  */
 const EXTENSIONS_BY_FORMAT: Partial<Record<Format, string[]>> = {
-    jpeg: ["jpg", "jpeg"], png: ["png"], pdf: ["pdf"],
+    jpeg: ["jpg", "jpeg"], png: ["png"], webp: ["webp"], pdf: ["pdf"],
 };
 const ACCEPTED_EXTENSIONS = ACCEPTED_FORMATS.flatMap(f => EXTENSIONS_BY_FORMAT[f] ?? []);
 const ACCEPT_ATTR = [...ACCEPTED_EXTENSIONS.map(e => `.${e}`), ...ACCEPTED_TYPES].join(",");
@@ -81,9 +67,19 @@ function isAcceptedFile(file: File): boolean {
  * `process.env.NEXT_PUBLIC_TARGET === "desktop"` test, which the bundler folds away on web).
  */
 const IS_DESKTOP = process.env.NEXT_PUBLIC_TARGET === "desktop";
-const ACCEPTED_LABEL = ACCEPTED_FORMATS
-    .map(f => CAPABILITIES[f].extension.toUpperCase())
-    .join(", ");
+const FORMAT_NAME: Record<Format, string> = { jpeg: "JPG", png: "PNG", webp: "WebP", avif: "AVIF", pdf: "PDF" };
+const ACCEPTED_NAMES = ACCEPTED_FORMATS.map(f => FORMAT_NAME[f]);
+const ACCEPTED_LABEL = ACCEPTED_NAMES.join(", ");
+/** "JPG, PNG, WebP and PDF", for sentences. */
+const ACCEPTED_SENTENCE = ACCEPTED_NAMES.length > 1
+    ? `${ACCEPTED_NAMES.slice(0, -1).join(", ")} and ${ACCEPTED_NAMES[ACCEPTED_NAMES.length - 1]}`
+    : ACCEPTED_NAMES.join("");
+
+/** Longest-side caps offered in the panel. "off" leaves dimensions alone. */
+type MaxSize = "off" | "2560" | "1920" | "1280";
+const MAX_SIZES: MaxSize[] = ["off", "2560", "1920", "1280"];
+/** "keep" hands back the format it was given; "webp" converts every image. PDFs are never converted. */
+type OutputChoice = "keep" | "webp";
 
 /**
  * IndexedDB holds settings and nothing else -- no `File` objects, no previews,
@@ -116,10 +112,15 @@ interface Settings {
     pngMode: PngMode;
     /** PDF only. On (default) keeps levels 1-2; off allows level 3 flatten. */
     keepTextSelectable: boolean;
+    /** Images only. Cap on the longest side; images inside it are never enlarged. */
+    maxSize: MaxSize;
+    /** Images only. */
+    output: OutputChoice;
 }
 
 const DEFAULT_SETTINGS: Settings = {
     preset: DEFAULT_PRESET, pngMode: DEFAULT_PNG_MODE, keepTextSelectable: true,
+    maxSize: "off", output: "keep",
 };
 
 // --- Types ---
@@ -155,8 +156,10 @@ interface FileItem {
     pngSkip?: { achieved: number; min: number };
     /** Lossy PNG only. A WebP of the same pixels that beats the PNG result enough to offer. */
     webpOffer?: { blob: Blob; savedRatio: number };
-    /** Set once the user has swapped the output for the WebP. */
+    /** Set when the output is a WebP of a non-WebP source: the Output setting, or the nudge's swap. */
     convertedTo?: "webp";
+    /** Set when the kept result was scaled down to the Max size cap. */
+    resizedTo?: { width: number; height: number };
 }
 
 const PRESET_LABEL: Record<Preset, string> = { min: "Min", medium: "Medium", max: "Max" };
@@ -171,6 +174,25 @@ const outputName = (f: FileItem) => {
     if (f.convertedTo === "webp") return `smartpress_${f.file.name.replace(/\.[^./\\]+$/, "")}.webp`;
     return f.alreadyOptimal ? f.file.name : `smartpress_${f.file.name}`;
 };
+
+/**
+ * Output names for one batch, made unique. Two rows can land on the same name:
+ * the same file added twice, or `logo.png` and `logo.jpg` both converted to
+ * `smartpress_logo.webp`. Written to a folder, the second would silently
+ * replace the first, so later duplicates get a " (2)" suffix.
+ */
+function uniqueOutputNames(items: FileItem[]): string[] {
+    const seen = new Map<string, number>();
+    return items.map(item => {
+        const filename = outputName(item);
+        const key = filename.toLowerCase();
+        const n = (seen.get(key) ?? 0) + 1;
+        seen.set(key, n);
+        if (n === 1) return filename;
+        const dot = filename.lastIndexOf(".");
+        return dot > 0 ? `${filename.slice(0, dot)} (${n})${filename.slice(dot)}` : `${filename} (${n})`;
+    });
+}
 
 // --- Main Component ---
 
@@ -233,6 +255,9 @@ export default function Compressor({ version }: { version: string }) {
                         pngMode: stored.pngMode === "lossless" ? "lossless" : DEFAULT_PNG_MODE,
                         keepTextSelectable: typeof stored.keepTextSelectable === "boolean"
                             ? stored.keepTextSelectable : true,
+                        maxSize: MAX_SIZES.includes(stored.maxSize as MaxSize)
+                            ? stored.maxSize as MaxSize : "off",
+                        output: stored.output === "webp" ? "webp" : "keep",
                     });
                 }
                 // Drop v1's keys, which stored whole file items. Doing it here
@@ -353,7 +378,6 @@ export default function Compressor({ version }: { version: string }) {
         const item = filesRef.current.find(f => f.id === id);
         if (!item?.format) return;
         const format = item.format;
-        const cap = CAPABILITIES[format];
 
         pool.cancel(id);
 
@@ -364,7 +388,7 @@ export default function Compressor({ version }: { version: string }) {
             resultBlob: undefined, newSize: undefined,
             alreadyOptimal: undefined, saved: undefined,
             pageCount: undefined, pdfNote: undefined, pngSkip: undefined,
-            webpOffer: undefined, convertedTo: undefined,
+            webpOffer: undefined, convertedTo: undefined, resizedTo: undefined,
         } : f));
 
         try {
@@ -372,6 +396,9 @@ export default function Compressor({ version }: { version: string }) {
                 id,
                 file: item.file,
                 format,
+                outputFormat: settingsRef.current.output === "webp" ? "webp" : undefined,
+                maxDimension: settingsRef.current.maxSize === "off"
+                    ? undefined : Number(settingsRef.current.maxSize),
                 options: {
                     quality: PRESET_SCALE[settingsRef.current.preset],
                     pngMode: settingsRef.current.pngMode,
@@ -394,7 +421,7 @@ export default function Compressor({ version }: { version: string }) {
             const skipped = result.png?.skipped === true;
             const worthIt = !skipped && isWorthKeeping(item.file.size, outBytes);
             const output: Blob = worthIt
-                ? new Blob([result.bytes as unknown as BlobPart], { type: cap.mimeType })
+                ? new Blob([result.bytes as unknown as BlobPart], { type: CAPABILITIES[result.format].mimeType })
                 : item.file;
 
             setFiles(prev => prev.map(f => f.id === id ? {
@@ -406,6 +433,11 @@ export default function Compressor({ version }: { version: string }) {
                 alreadyOptimal: !worthIt,
                 pageCount: result.pageCount,
                 pdfNote: result.pdfNote,
+                // Only a kept result is a conversion or a resize: when the
+                // original is handed back, it is neither.
+                convertedTo: worthIt && result.format === "webp" && format !== "webp" ? "webp" : undefined,
+                resizedTo: worthIt && result.resized && result.width && result.height
+                    ? { width: result.width, height: result.height } : undefined,
                 webpOffer: result.webp
                     ? {
                         blob: new Blob([result.webp.bytes as unknown as BlobPart], { type: CAPABILITIES.webp.mimeType }),
@@ -440,6 +472,7 @@ export default function Compressor({ version }: { version: string }) {
                 ...f,
                 resultBlob: f.webpOffer.blob,
                 newSize: f.webpOffer.blob.size,
+                // The offer was encoded from the same (already resized) pixels, so resizedTo stands.
                 alreadyOptimal: false,
                 pngSkip: undefined,
                 convertedTo: "webp",
@@ -523,7 +556,9 @@ export default function Compressor({ version }: { version: string }) {
         const options: SaveAllOptions | null = IS_DESKTOP ? await desktopOptions() : { directory };
         if (!options) return;
         const saver = await getSaver();
-        const result = await saver.saveAll(ready.map(toSaveItem), {
+        const names = uniqueOutputNames(ready);
+        const nameById = new Map(ready.map((f, i) => [f.id, names[i]]));
+        const result = await saver.saveAll(ready.map((f, i) => ({ ...toSaveItem(f), filename: names[i] })), {
             ...options,
             archivePrefix: webpOnly ? "smartpress_webp" : undefined,
         });
@@ -532,7 +567,8 @@ export default function Compressor({ version }: { version: string }) {
         const outcomeByName = new Map(result.results.map(r => [r.filename, r.outcome]));
         setFiles(prev => prev.map(f => {
             if (f.status !== "done" || !f.resultBlob) return f;
-            const outcome = outcomeByName.get(outputName(f));
+            const name = nameById.get(f.id);
+            const outcome = name === undefined ? undefined : outcomeByName.get(name);
             if (!outcome) return f;
             // A failed retry must drop any stale "saved" label from an earlier
             // attempt -- otherwise this row would claim success on a run that
@@ -602,6 +638,8 @@ export default function Compressor({ version }: { version: string }) {
     const anyDone = doneRows.length > 0;
     const webpToSave = files.filter(f => f.status === "done" && f.resultBlob && f.convertedTo === "webp" && !f.saved).length;
     const unsavedDone = doneRows.filter(f => !f.saved).length;
+    /** "Save all WebP" is a subset action: with every result a WebP it would only repeat Save all. */
+    const mixedOutputs = doneRows.some(f => f.convertedTo !== "webp" && f.format !== "webp");
     /** Desktop: reveal the last saved file in Finder. */
     const revealInFinder = async () => {
         if (process.env.NEXT_PUBLIC_TARGET !== "desktop" || !revealPath) return;
@@ -621,7 +659,7 @@ export default function Compressor({ version }: { version: string }) {
         let status: FileRowStatus = f.status;
         const notes: string[] = [];
         if (f.status === "unsupported") {
-            notes.push("Only JPG, PNG and PDF files can be compressed.");
+            notes.push(`Only ${ACCEPTED_SENTENCE} files can be compressed.`);
         } else if (f.status === "error") {
             notes.push(f.error?.message ?? "Compression failed.");
         } else if (f.status === "done") {
@@ -643,6 +681,7 @@ export default function Compressor({ version }: { version: string }) {
             }
             if (f.pdfNote === "flatten-not-smaller") notes.push("Flattening wouldn’t save more — text kept selectable.");
             if (f.pdfNote === "flatten-failed") notes.push("Flattening failed — text kept selectable.");
+            if (f.resizedTo) notes.push(`Resized to ${f.resizedTo.width} × ${f.resizedTo.height}`);
             if (f.convertedTo === "webp") notes.push("Converted to WebP.");
         }
 
@@ -731,7 +770,11 @@ export default function Compressor({ version }: { version: string }) {
                             tabIndex={0}
                             aria-label="Add files"
                             className={clsx(
-                                "flex flex-shrink-0 cursor-pointer items-center justify-between gap-4 rounded-xl border border-dashed px-5 py-4 transition-colors",
+                                "flex cursor-pointer rounded-xl border border-dashed transition-colors",
+                                // Empty: the drop target is the whole column, not a strip above blank space.
+                                files.length === 0
+                                    ? "flex-1 flex-col items-start justify-center gap-2 px-8 py-10"
+                                    : "flex-shrink-0 items-center justify-between gap-4 px-5 py-4",
                                 dragActive ? "border-control-border bg-raised" : "border-line-strong hover:bg-surface",
                             )}
                             onClick={() => { void openPicker(); }}
@@ -746,18 +789,24 @@ export default function Compressor({ version }: { version: string }) {
                             onDragOver={handleDrag}
                             onDrop={handleDrop}
                         >
-                            <p className="text-body">{dragActive ? "Drop to add" : "Drop files or a folder"}</p>
-                            <p className="label-mono text-text-muted">{ACCEPTED_LABEL}</p>
+                            {files.length === 0 ? (
+                                <>
+                                    <h1 className="text-display">Smaller files. Nothing sent.</h1>
+                                    <p className="text-body text-text-muted">
+                                        Everything runs on this device.{" "}
+                                        {dragActive ? "Drop to add." : "Drop files or a folder here, or click to choose."}
+                                    </p>
+                                    <p className="label-mono mt-2 text-text-muted">{ACCEPTED_LABEL}</p>
+                                </>
+                            ) : (
+                                <>
+                                    <p className="text-body">{dragActive ? "Drop to add" : "Drop files or a folder"}</p>
+                                    <p className="label-mono text-text-muted">{ACCEPTED_LABEL}</p>
+                                </>
+                            )}
                         </div>
 
-                        {files.length === 0 ? (
-                            <div className="flex flex-1 flex-col items-start justify-center gap-2">
-                                <h1 className="text-display">Smaller files. Nothing sent.</h1>
-                                <p className="text-body text-text-muted">
-                                    Everything runs on this device. Drop images or PDFs above to start.
-                                </p>
-                            </div>
-                        ) : (
+                        {files.length > 0 && (
                             <>
                                 <div className={clsx(FILE_ROW_GRID, "label-mono flex-shrink-0 px-3 text-text-muted")} aria-hidden="true">
                                     <span>File</span>
@@ -788,34 +837,34 @@ export default function Compressor({ version }: { version: string }) {
                                 />
                             </section>
 
-                            <fieldset>
-                                <legend className="label-mono mb-3 text-text-muted">PNG mode</legend>
-                                <div className="flex flex-col gap-3">
-                                    <Choice
-                                        type="radio" name="png-mode" checked={settings.pngMode === "lossy"}
-                                        onChange={() => setSettings(s => ({ ...s, pngMode: "lossy" }))}
-                                        label="Smaller (palette)" hint="Reduces to a 256-colour palette. Where the big PNG savings are."
-                                    />
-                                    <Choice
-                                        type="radio" name="png-mode" checked={settings.pngMode === "lossless"}
-                                        onChange={() => setSettings(s => ({ ...s, pngMode: "lossless" }))}
-                                        label="Lossless" hint="Every pixel kept. Saves far less."
-                                    />
-                                </div>
-                            </fieldset>
-
-                            {!IS_DESKTOP && (
                             <section>
-                                <h2 className="label-mono mb-3 text-text-muted">PDF</h2>
-                                <Choice
-                                    type="checkbox" checked={settings.keepTextSelectable}
-                                    onChange={(e) => setSettings(s => ({ ...s, keepTextSelectable: e.target.checked }))}
-                                    label="Keep PDF text selectable"
-                                    hint="Off flattens each page to an image. Smaller, but text and links are lost."
+                                <h2 className="label-mono mb-3 text-text-muted">Max size</h2>
+                                <PresetSelector
+                                    label="Max size"
+                                    options={MAX_SIZES.map(m => ({ value: m, label: m === "off" ? "Off" : m }))}
+                                    value={settings.maxSize}
+                                    onChange={(maxSize) => setSettings(s => ({ ...s, maxSize }))}
+                                    hint={settings.maxSize === "off"
+                                        ? "Image dimensions are left as they are."
+                                        : `Images are scaled so the longest side is at most ${settings.maxSize} px. Smaller ones are untouched.`}
                                 />
                             </section>
-                            )}
 
+                            <section>
+                                <h2 className="label-mono mb-3 text-text-muted">Output</h2>
+                                <PresetSelector
+                                    label="Output format"
+                                    options={[{ value: "keep", label: "Keep format" }, { value: "webp", label: "WebP" }]}
+                                    value={settings.output}
+                                    onChange={(output) => setSettings(s => ({ ...s, output }))}
+                                    hint={settings.output === "keep"
+                                        ? "Each file comes back in the format it arrived in."
+                                        : "Every image is saved as WebP. PDFs stay PDFs."}
+                                />
+                            </section>
+
+                            {/* Save to sits above the per-format options on purpose: it applies to
+                                every batch, and the panel scrolls, so it must not end up below the fold. */}
                             <fieldset>
                                 <legend className="label-mono mb-3 text-text-muted">Save to</legend>
                                 <div className="flex flex-col gap-3">
@@ -849,14 +898,13 @@ export default function Compressor({ version }: { version: string }) {
                                         </>
                                     ) : (
                                         <>
-                                    <Choice
-                                        type="radio" name="save-to" checked readOnly
-                                        onChange={() => {}}
-                                        label="Choose folder"
-                                        hint={canPickFolder
-                                            ? (folder ? "Finished files are written here." : "Pick a folder and finished files save there. Otherwise use Save all.")
+                                    {/* One destination on the web, so no radio: a lone
+                                        radio is a control with nothing to choose. */}
+                                    <p className="text-small text-text-muted">
+                                        {canPickFolder
+                                            ? (folder ? "Finished files are written to this folder." : "Pick a folder and finished files save there. Otherwise use Save all.")
                                             : "This browser can't write to a folder, so files download instead. Save all bundles several files into one ZIP."}
-                                    />
+                                    </p>
                                     <div className="flex gap-2">
                                         <div
                                             className="data-mono flex h-8 min-w-0 flex-1 items-center rounded-md border border-control-border bg-ground px-3 text-text-muted"
@@ -874,6 +922,34 @@ export default function Compressor({ version }: { version: string }) {
                                     )}
                                 </div>
                             </fieldset>
+
+                            <fieldset disabled={settings.output === "webp"} className={clsx(settings.output === "webp" && "opacity-40")}>
+                                <legend className="label-mono mb-3 text-text-muted">PNG mode</legend>
+                                <div className="flex flex-col gap-3">
+                                    <Choice
+                                        type="radio" name="png-mode" checked={settings.pngMode === "lossy"}
+                                        onChange={() => setSettings(s => ({ ...s, pngMode: "lossy" }))}
+                                        label="Smaller (palette)" hint="Reduces to a 256-colour palette. Where the big PNG savings are."
+                                    />
+                                    <Choice
+                                        type="radio" name="png-mode" checked={settings.pngMode === "lossless"}
+                                        onChange={() => setSettings(s => ({ ...s, pngMode: "lossless" }))}
+                                        label="Lossless" hint="Every pixel kept. Saves far less."
+                                    />
+                                </div>
+                            </fieldset>
+
+                            {!IS_DESKTOP && (
+                            <section>
+                                <h2 className="label-mono mb-3 text-text-muted">PDF</h2>
+                                <Choice
+                                    type="checkbox" checked={settings.keepTextSelectable}
+                                    onChange={(e) => setSettings(s => ({ ...s, keepTextSelectable: e.target.checked }))}
+                                    label="Keep PDF text selectable"
+                                    hint="Off flattens each page to an image. Smaller, but text and links are lost."
+                                />
+                            </section>
+                            )}
                         </div>
 
                         <Button
@@ -909,7 +985,7 @@ export default function Compressor({ version }: { version: string }) {
                                 Convert all to WebP
                             </Button>
                         )}
-                        {webpToSave > 0 && inFlight === 0 && (
+                        {webpToSave > 0 && mixedOutputs && inFlight === 0 && (
                             <Button variant="quiet" size="sm" onClick={() => { void downloadAll(folder ?? undefined, "webp"); }}>
                                 Save all WebP
                             </Button>

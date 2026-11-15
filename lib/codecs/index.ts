@@ -6,7 +6,7 @@
  * of them needs. Swapping a codec -- for instance to a permissively licensed
  * PNG quantizer -- is contained entirely behind this boundary.
  */
-export { decode, toPlain } from "./decode";
+export { decode, decodeFit, fitWithin, toPlain } from "./decode";
 export { CAPABILITIES, FORMATS, ALL_FORMATS, capabilityOf } from "./capabilities";
 export { DEFAULT_QUALITY, DEFAULT_PNG_MODE, DEFAULT_PRESET, PNG_PRESETS, PRESET_SCALE, nativeQuality } from "./quality";
 export { loadWasm, clearWasmCache } from "./loader";

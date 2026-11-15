@@ -25,6 +25,10 @@ export interface CompressJob {
     format: Format;
     /** The abstract 0-10 scale plus per-codec options; curves live in quality.ts. */
     options: EncodeOptions;
+    /** Images only: encode to this format instead of the input's own. */
+    outputFormat?: Format;
+    /** Images only: cap the longest side at this many pixels. Never enlarges. */
+    maxDimension?: number;
     /**
      * Stage is passed through, not just the number. These encoders expose no
      * progress callback, so a percentage alone crawls and reads as hung; the UI
@@ -44,6 +48,12 @@ export interface CompressResult {
     png?: PngQualityReport;
     /** PNG only: a WebP of the same pixels, present only when it beats the PNG result enough to offer. */
     webp?: { bytes: Uint8Array; savedRatio: number };
+    /** The format `bytes` is in: the input's own unless an output format was asked for. */
+    format: Format;
+    /** Images only: output pixel size, and whether it was scaled down. */
+    width?: number;
+    height?: number;
+    resized?: boolean;
 }
 
 /**
@@ -134,6 +144,10 @@ export class CodecPool {
                     pdfNote: msg.pdfNote,
                     png: msg.png,
                     webp: msg.webp && { bytes: new Uint8Array(msg.webp.bytes), savedRatio: msg.webp.savedRatio },
+                    format: msg.format,
+                    width: msg.width,
+                    height: msg.height,
+                    resized: msg.resized,
                 });
             } else {
                 waiting.reject(new Error(msg.error));
@@ -158,6 +172,7 @@ export class CodecPool {
 
         const req: WorkerRequest = {
             id: job.id, file: job.file, format: job.format, options: job.options,
+            outputFormat: job.outputFormat, maxDimension: job.maxDimension,
         };
         slot.worker.postMessage(req);
     }

@@ -167,21 +167,28 @@ show nothing.
 
 ---
 
-### Sprint 2.4 — Format Conversion
+### Sprint 2.4 — Format Conversion (partly shipped as 3.2.0)
+
+Un-parked in Nov 2026 when SmartPress became a public tool. 3.2.0 shipped the two
+parts that move the most bytes; the rest stays open.
 
 **Tasks**
 
-- [ ] Output format: `Keep original | JPEG | WebP | PNG` (AVIF unscheduled).
+- [x] Output format: `Keep format | WebP` (3.2.0). JPEG and PNG as targets are not offered,
+      which is also what keeps the transparency problem below from existing yet.
+- [x] Resize: max-dimension cap (Off / 2560 / 1920 / 1280) that **never upscales** (3.2.0).
+- [x] WebP accepted as an input format (3.2.0).
+- [x] Filename handling when the output extension changes on conversion, and dedupe when
+      two differently-named originals would collide after conversion (3.2.0, " (2)" suffix).
 - [ ] **Smart mode** (optional toggle): encode to several candidates, keep the smallest.
       Costs CPU, wins bytes — make the tradeoff explicit in the UI.
-- [ ] **Transparency guard.** PNG-with-alpha → JPEG silently flattens onto black. Detect
-      alpha and either warn or exclude JPEG from the options for that file.
-- [ ] Resize: max-dimension cap that **never upscales**. Fixes v2's `scale=1280:-1`, which
-      enlarged small images and could emit an odd height that libx264 rejected.
-- [ ] Metadata: strip EXIF by default, toggle to preserve. Orientation is already applied
-      before stripping (Sprint 1.2) — this only adds the preserve toggle.
-- [ ] Filename handling when the output extension changes on conversion, and dedupe when
-      two differently-named originals would collide after conversion.
+- [ ] **Transparency guard.** Only needed once JPEG is an output target: PNG-with-alpha →
+      JPEG silently flattens onto black.
+- [ ] Metadata: strip EXIF by default, toggle to preserve.
+
+**Next, in order (public-tool track):** target size ("get this under 2 MB"), recipes
+(one-click presets combining size cap + format + strength), before/after compare,
+HEIC input.
 
 **Done when:** a phone JPEG converts to WebP at roughly half the size with correct
 orientation, and an alpha PNG cannot be silently flattened to JPEG.

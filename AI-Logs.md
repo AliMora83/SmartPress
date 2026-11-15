@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-11-15 | Sprint 3.2.0 — resize, WebP output, UI fixes | Claude (Fable 5.2)
+
+Branch `sprint/3.2.0-resize-output-format` off `main`. First sprint of the public-tool track.
+
+- **Max size.** New panel setting Off / 2560 / 1920 / 1280. `decodeFit()` in `lib/codecs/decode.ts` caps the longest side after orientation is applied and never enlarges; downscaling is done in halving steps on `OffscreenCanvas` to avoid aliasing. Images only; PDFs ignore it.
+- **Output.** New panel setting Keep format / WebP. The worker encodes to `outputFormat ?? format` and reports the format it produced; the WebP nudge is keyed on the output format, so a converted PNG offers nothing further. PNG mode is disabled while Output is WebP. PDFs are never converted.
+- **WebP input** accepted (web dropzone, desktop picker and folder walk).
+- **Keep-original rule unchanged.** A resized or converted result still has to beat the original by `MIN_GAIN_RATIO`, or the original is handed back and the row carries no "Resized"/"Converted" note.
+- **Name collisions.** A batch save now makes output names unique (" (2)"), so `logo.png` and `logo.jpg` both converting to `smartpress_logo.webp` cannot overwrite each other in a chosen folder.
+- **UI.** Empty state: the drop target fills the column instead of a strip above blank space. Web "Save to" lost its single-option radio. Save to moved above PNG mode and PDF because the panel now scrolls at the design height. "Save all WebP" is hidden when every result is already WebP.
+
+**Verified against `next build` output (`out/`, headless Chrome 1400x900, generated fixtures).** Four setting combinations x 5 files (4000x3000 JPEG, 800x600 JPEG, EXIF-6 portrait JPEG, alpha PNG, WebP), outputs read back from the Save all ZIP: dimensions as expected (e.g. 4000x3000 -> 1920x1440, EXIF-6 3000x2000 -> upright 1280x1920, 800x600 untouched), WebP outputs are real WebP, PNG alpha survives conversion (RGBA, 0-255). **Default settings produce byte-identical JPEG and PNG output to `main`** (same four files, same build flow). A PDF with resize + WebP on stays a PDF.
+
+**Not verified:** the desktop (Tauri) build, Safari, and the Chromium folder-picker save path (headless cannot drive the picker; the test ran the ZIP fallback). The sandbox cannot reach Google Fonts, so the verification builds stubbed `next/font` locally; that stub is not committed and CI builds the real layout. No quality metric was run on the downscaler; it was checked by dimensions and eye only.
+
+Version 3.2.0.
+
+---
+
 ## 2026-10-09 | Sprint 3.1.0 — desktop app + pdf.js compatibility | Claude (Sonnet 5.5)
 
 Branch `sprint/3.3a-tauri-spike` (3.3a spike + 3.3b), rebased onto `main` after #18 (`89ccd7c`).
