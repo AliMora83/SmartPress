@@ -58,7 +58,7 @@ async fn pick_files(app: AppHandle) -> Vec<String> {
     let picked = app
         .dialog()
         .file()
-        .add_filter("Images and PDFs", &["jpg", "jpeg", "png", "pdf"])
+        .add_filter("Images and PDFs", &["jpg", "jpeg", "png", "webp", "pdf"])
         .blocking_pick_files()
         .unwrap_or_default();
     picked

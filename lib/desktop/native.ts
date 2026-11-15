@@ -21,7 +21,7 @@ export interface SourceFile {
 }
 
 const MIME: Record<string, string> = {
-    jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", pdf: "application/pdf",
+    jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", pdf: "application/pdf",
 };
 
 const extOf = (name: string) => {

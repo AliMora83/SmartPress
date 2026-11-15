@@ -13,28 +13,95 @@ import { orientationTransform, readJpegOrientation } from "./exifOrientation";
  * option; only then does the fallback run, and Chrome never reaches it.
  */
 export async function decode(file: Blob): Promise<ImageData> {
+    return (await decodeFit(file)).image;
+}
+
+/**
+ * Decode, optionally capped so the longest side is at most `maxDimension`.
+ * Never enlarges: an image already inside the cap comes back untouched, with
+ * `resized: false`. Orientation is applied first, so the cap is measured on the
+ * upright image.
+ */
+export async function decodeFit(
+    file: Blob, maxDimension?: number,
+): Promise<{ image: ImageData; resized: boolean }> {
     const { bitmap, upright } = await decodeBitmap(file);
     try {
-        if (upright) return draw(bitmap, bitmap.width, bitmap.height, [1, 0, 0, 1, 0, 0]);
-        // The engine hands back raw pixel order: apply the file's EXIF orientation ourselves.
-        const o = readJpegOrientation(new Uint8Array(await file.arrayBuffer()));
-        const t = orientationTransform(o, bitmap.width, bitmap.height);
-        return draw(bitmap, t.width, t.height, t.matrix);
+        let t: { width: number; height: number; matrix: Matrix } =
+            { width: bitmap.width, height: bitmap.height, matrix: [1, 0, 0, 1, 0, 0] };
+        if (!upright) {
+            // The engine hands back raw pixel order: apply the file's EXIF orientation ourselves.
+            const o = readJpegOrientation(new Uint8Array(await file.arrayBuffer()));
+            t = orientationTransform(o, bitmap.width, bitmap.height);
+        }
+        const full = orient(bitmap, t.width, t.height, t.matrix);
+        const fit = fitWithin(t.width, t.height, maxDimension);
+        if (!fit) return { image: read(full), resized: false };
+        return { image: read(downscale(full, fit.width, fit.height)), resized: true };
     } finally {
         bitmap.close();
     }
 }
 
-function draw(
-    bitmap: ImageBitmap, width: number, height: number,
-    m: [number, number, number, number, number, number],
-): ImageData {
-    const canvas = new OffscreenCanvas(width, height);
+type Matrix = [number, number, number, number, number, number];
+
+/**
+ * The size that fits `width` x `height` inside a `max` square, or null when no
+ * resize is needed (no cap, or already inside it). Aspect ratio is kept.
+ */
+export function fitWithin(
+    width: number, height: number, max?: number,
+): { width: number; height: number } | null {
+    if (!max || max <= 0) return null;
+    const longest = Math.max(width, height);
+    if (longest <= max) return null;
+    const scale = max / longest;
+    return {
+        width: Math.max(1, Math.round(width * scale)),
+        height: Math.max(1, Math.round(height * scale)),
+    };
+}
+
+function context(canvas: OffscreenCanvas): OffscreenCanvasRenderingContext2D {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("DECODE_FAILED: no 2D context available");
+    return ctx;
+}
+
+function orient(bitmap: ImageBitmap, width: number, height: number, m: Matrix): OffscreenCanvas {
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = context(canvas);
     ctx.setTransform(...m);
     ctx.drawImage(bitmap, 0, 0);
-    return ctx.getImageData(0, 0, width, height);
+    return canvas;
+}
+
+const read = (canvas: OffscreenCanvas): ImageData =>
+    context(canvas).getImageData(0, 0, canvas.width, canvas.height);
+
+/**
+ * Downscale in halving steps, then one final draw to the exact size. A single
+ * drawImage across a large ratio samples too few source pixels and aliases
+ * (shimmering edges, moire on fine texture); halving keeps each step inside the
+ * range the browser's filter handles well.
+ */
+function downscale(source: OffscreenCanvas, width: number, height: number): OffscreenCanvas {
+    let current = source;
+    while (current.width / 2 >= width && current.height / 2 >= height) {
+        const half = new OffscreenCanvas(Math.max(1, current.width >> 1), Math.max(1, current.height >> 1));
+        const ctx = context(half);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(current, 0, 0, half.width, half.height);
+        current = half;
+    }
+    if (current.width === width && current.height === height) return current;
+    const out = new OffscreenCanvas(width, height);
+    const ctx = context(out);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(current, 0, 0, width, height);
+    return out;
 }
 
 /** Set once `from-image` has thrown, so later files skip the failing call. */
