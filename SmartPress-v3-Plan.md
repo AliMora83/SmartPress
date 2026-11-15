@@ -186,9 +186,39 @@ parts that move the most bytes; the rest stays open.
       JPEG silently flattens onto black.
 - [ ] Metadata: strip EXIF by default, toggle to preserve.
 
-**Next, in order (public-tool track):** target size ("get this under 2 MB"), recipes
+**Next, in order (public-tool track):** ~~target size~~ (shipped as 3.3.0), recipes
 (one-click presets combining size cap + format + strength), before/after compare,
 HEIC input.
+
+---
+
+### Sprint 3.3.0 — Target size (shipped)
+
+"Get this under 2 MB" is the job people arrive with; a preset makes them guess at it.
+
+**Shipped**
+
+- [x] Target size setting: Off / 500 KB / 1 MB / 2 MB, every format.
+- [x] Search in `lib/codecs/targetSize.ts`: bisection on the 0-10 scale for JPEG, WebP
+      and PDF images; the three pngquant presets as a ladder for lossy PNG; a single
+      measured encode for lossless PNG, which has no quality to trade.
+- [x] The preset stays the ceiling — a target only ever makes a file smaller.
+- [x] An unreachable target returns the ordinary preset result and says so on the row,
+      rather than shipping a scale-0 encode that is both degraded and still too big.
+
+**Open**
+
+- [ ] A custom target value. Four fixed steps miss the 200 KB and 5 MB cases, and a
+      number field is the obvious answer — it needs units, validation and persistence.
+- [ ] Use the target in the WebP nudge: when PNG misses the target and WebP would reach
+      it, the nudge should say so instead of quoting a percentage.
+- [ ] `convertToWebp` (the Convert button and "Convert all to WebP") still encodes at the
+      preset and ignores the target.
+- [ ] Settings panel structure. With Target size the panel no longer fits the card at the
+      design height; the next control needs grouping or progressive disclosure first.
+- [ ] Let an unreachable target try flattening a PDF, or a resize, instead of giving up —
+      both change the file in ways the user did not ask for, so it needs a UI decision
+      first, not just code.
 
 **Done when:** a phone JPEG converts to WebP at roughly half the size with correct
 orientation, and an alpha PNG cannot be silently flattened to JPEG.

@@ -42,6 +42,13 @@ export const PNG_PRESETS: Record<Preset, { min: number; max: number }> = {
 export const DEFAULT_PRESET: Preset = "medium";
 
 /**
+ * The presets in quality order, highest first. This is the ladder a target-size
+ * search walks down for lossy PNG, whose axis is these three ranges rather than
+ * the 0-10 scale -- see targetSize.ts for why it is not interpolated.
+ */
+export const PRESET_LADDER: readonly Preset[] = ["min", "medium", "max"];
+
+/**
  * Each preset on the 0-10 scale, which every non-PNG-lossy path then runs
  * through its own curve: JPEG (and PDF images, which use the JPEG path) Min 82 /
  * Medium 71 / Max 63; WebP Min 83 / Medium 71 / Max 59, which is also the tier

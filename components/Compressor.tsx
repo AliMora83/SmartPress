@@ -75,6 +75,23 @@ const ACCEPTED_SENTENCE = ACCEPTED_NAMES.length > 1
     ? `${ACCEPTED_NAMES.slice(0, -1).join(", ")} and ${ACCEPTED_NAMES[ACCEPTED_NAMES.length - 1]}`
     : ACCEPTED_NAMES.join("");
 
+/**
+ * Output size targets offered in the panel. Bytes are 1024-based to match
+ * `formatSize`, so "1 MB" here and "1.00 MB" in the Result column mean the
+ * same thing — a target the row then appears to miss would be a bug the user
+ * can see.
+ */
+const TARGET_SIZES = [
+    { value: "off", label: "Off", bytes: 0 },
+    { value: "500k", label: "500 KB", bytes: 500 * 1024 },
+    { value: "1m", label: "1 MB", bytes: 1024 * 1024 },
+    { value: "2m", label: "2 MB", bytes: 2 * 1024 * 1024 },
+] as const;
+type TargetSize = (typeof TARGET_SIZES)[number]["value"];
+const TARGET = Object.fromEntries(
+    TARGET_SIZES.map(t => [t.value, t]),
+) as Record<TargetSize, (typeof TARGET_SIZES)[number]>;
+
 /** Longest-side caps offered in the panel. "off" leaves dimensions alone. */
 type MaxSize = "off" | "2560" | "1920" | "1280";
 const MAX_SIZES: MaxSize[] = ["off", "2560", "1920", "1280"];
@@ -116,11 +133,13 @@ interface Settings {
     maxSize: MaxSize;
     /** Images only. */
     output: OutputChoice;
+    /** Every format. "off" means one encode at the preset, as before. */
+    targetSize: TargetSize;
 }
 
 const DEFAULT_SETTINGS: Settings = {
     preset: DEFAULT_PRESET, pngMode: DEFAULT_PNG_MODE, keepTextSelectable: true,
-    maxSize: "off", output: "keep",
+    maxSize: "off", output: "keep", targetSize: "off",
 };
 
 // --- Types ---
@@ -160,6 +179,11 @@ interface FileItem {
     convertedTo?: "webp";
     /** Set when the kept result was scaled down to the Max size cap. */
     resizedTo?: { width: number; height: number };
+    /**
+     * Set when a target size could not be reached, carrying what was asked for
+     * and the preset whose result was kept instead.
+     */
+    targetMissed?: { label: string; preset: Preset };
 }
 
 const PRESET_LABEL: Record<Preset, string> = { min: "Min", medium: "Medium", max: "Max" };
@@ -258,6 +282,8 @@ export default function Compressor({ version }: { version: string }) {
                         maxSize: MAX_SIZES.includes(stored.maxSize as MaxSize)
                             ? stored.maxSize as MaxSize : "off",
                         output: stored.output === "webp" ? "webp" : "keep",
+                        targetSize: (stored.targetSize as TargetSize) in TARGET
+                            ? stored.targetSize as TargetSize : "off",
                     });
                 }
                 // Drop v1's keys, which stored whole file items. Doing it here
@@ -388,23 +414,28 @@ export default function Compressor({ version }: { version: string }) {
             resultBlob: undefined, newSize: undefined,
             alreadyOptimal: undefined, saved: undefined,
             pageCount: undefined, pdfNote: undefined, pngSkip: undefined,
-            webpOffer: undefined, convertedTo: undefined, resizedTo: undefined,
+            webpOffer: undefined, convertedTo: undefined, resizedTo: undefined, targetMissed: undefined,
         } : f));
+
+        // Read once, at dispatch: a batch runs for a while and the panel stays
+        // live, so the row's notes have to describe the settings this file was
+        // actually compressed with, not whatever is selected when it finishes.
+        const { preset, pngMode, keepTextSelectable, output: outputChoice, maxSize, targetSize } = settingsRef.current;
 
         try {
             const result = await pool.run({
                 id,
                 file: item.file,
                 format,
-                outputFormat: settingsRef.current.output === "webp" ? "webp" : undefined,
-                maxDimension: settingsRef.current.maxSize === "off"
-                    ? undefined : Number(settingsRef.current.maxSize),
+                outputFormat: outputChoice === "webp" ? "webp" : undefined,
+                targetBytes: TARGET[targetSize].bytes || undefined,
+                maxDimension: maxSize === "off" ? undefined : Number(maxSize),
                 options: {
-                    quality: PRESET_SCALE[settingsRef.current.preset],
-                    pngMode: settingsRef.current.pngMode,
-                    pngPreset: settingsRef.current.preset,
+                    quality: PRESET_SCALE[preset],
+                    pngMode,
+                    pngPreset: preset,
                     // Desktop always keeps text: flatten is not offered there (pdf.js renders blank in its WebKit).
-                    keepTextSelectable: IS_DESKTOP ? true : settingsRef.current.keepTextSelectable,
+                    keepTextSelectable: IS_DESKTOP ? true : keepTextSelectable,
                 },
                 onProgress: (progress, stage) => setFiles(prev => prev.map(f =>
                     f.id === id ? { ...f, status: "processing", progress, stage } : f)),
@@ -438,6 +469,11 @@ export default function Compressor({ version }: { version: string }) {
                 convertedTo: worthIt && result.format === "webp" && format !== "webp" ? "webp" : undefined,
                 resizedTo: worthIt && result.resized && result.width && result.height
                     ? { width: result.width, height: result.height } : undefined,
+                // An unreachable target is reported whether or not the result
+                // was kept: the user asked for a size and did not get it, and
+                // that is true of their own original too.
+                targetMissed: result.targetMet === false
+                    ? { label: TARGET[targetSize].label, preset } : undefined,
                 webpOffer: result.webp
                     ? {
                         blob: new Blob([result.webp.bytes as unknown as BlobPart], { type: CAPABILITIES.webp.mimeType }),
@@ -681,6 +717,11 @@ export default function Compressor({ version }: { version: string }) {
             }
             if (f.pdfNote === "flatten-not-smaller") notes.push("Flattening wouldn’t save more — text kept selectable.");
             if (f.pdfNote === "flatten-failed") notes.push("Flattening failed — text kept selectable.");
+            if (f.targetMissed) {
+                notes.push(
+                    `Couldn’t reach ${f.targetMissed.label} — kept the ${PRESET_LABEL[f.targetMissed.preset]} result.`,
+                );
+            }
             if (f.resizedTo) notes.push(`Resized to ${f.resizedTo.width} × ${f.resizedTo.height}`);
             if (f.convertedTo === "webp") notes.push("Converted to WebP.");
         }
@@ -838,6 +879,19 @@ export default function Compressor({ version }: { version: string }) {
                             </section>
 
                             <section>
+                                <h2 className="label-mono mb-3 text-text-muted">Target size</h2>
+                                <PresetSelector
+                                    label="Target size"
+                                    options={TARGET_SIZES.map(t => ({ value: t.value, label: t.label }))}
+                                    value={settings.targetSize}
+                                    onChange={(targetSize) => setSettings(s => ({ ...s, targetSize }))}
+                                    hint={settings.targetSize === "off"
+                                        ? "Compression alone decides the size."
+                                        : `Encoded repeatedly to land under ${TARGET[settings.targetSize].label}. Slower; Compression stays the ceiling.`}
+                                />
+                            </section>
+
+                            <section>
                                 <h2 className="label-mono mb-3 text-text-muted">Max size</h2>
                                 <PresetSelector
                                     label="Max size"
@@ -846,7 +900,7 @@ export default function Compressor({ version }: { version: string }) {
                                     onChange={(maxSize) => setSettings(s => ({ ...s, maxSize }))}
                                     hint={settings.maxSize === "off"
                                         ? "Image dimensions are left as they are."
-                                        : `Images are scaled so the longest side is at most ${settings.maxSize} px. Smaller ones are untouched.`}
+                                        : `Longest side at most ${settings.maxSize} px. Smaller images are untouched.`}
                                 />
                             </section>
 
@@ -864,7 +918,11 @@ export default function Compressor({ version }: { version: string }) {
                             </section>
 
                             {/* Save to sits above the per-format options on purpose: it applies to
-                                every batch, and the panel scrolls, so it must not end up below the fold. */}
+                                every batch, where PNG mode and PDF apply to one format each. With
+                                Target size added in 3.3.0 the panel no longer fits the card at the
+                                design height, so this is now the first section reached by scrolling
+                                rather than the last one visible -- the panel needs a structural
+                                answer (grouping or disclosure) before it gains another control. */}
                             <fieldset>
                                 <legend className="label-mono mb-3 text-text-muted">Save to</legend>
                                 <div className="flex flex-col gap-3">
