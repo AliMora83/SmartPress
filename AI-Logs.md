@@ -5,6 +5,20 @@
 
 ---
 
+## 2026-11-18 | Favicon — old mascot replaced with the logo mark | Claude (Opus 5)
+
+Branch `fix/favicon-mark` off `main`. Ali spotted the browser tab still showing the dropped mascot.
+
+- `app/favicon.ico` (229,696 B) and `app/icon.png` (238,190 B, 498x544) were the only assets still carrying the mascot retired in the 3.1 visual identity; the PWA icons had already been regenerated from the mark.
+- `scripts/make-icons.mjs` now generates all five, so the mark stays the single source: `app/favicon.ico` at 16/32/48 and `app/icon.png` at 512, alongside the three PWA icons. The ICO container is written by hand (6-byte header, 16 bytes a row, PNG payloads) rather than adding a dependency to package.json for a script that runs when the logo changes.
+- The favicon renders the mark at 0.78 of the canvas rather than the app icons' 0.62: at 16px in a strip of tabs, 0.62 leaves the rounded rect reading as a smudge with a gap around it. The ground square is kept rather than going transparent, because the mark is a stroke-only outline and a light tab strip would leave it floating.
+- The three PWA icons regenerate byte-identical, so the generator's existing output is unchanged.
+- 229,696 B -> 1,956 B for the favicon; 238,190 B -> 14,365 B for the icon.
+
+**Verified:** `next build` export carries the new `/favicon.ico` (16/32/48 confirmed in the container) and `/icon.png`; `check-export` passes; tsc and eslint clean. Not verified: how it looks in a real tab strip at every OS zoom level — reviewed as a rendered preview at 1x and 5x on light and dark.
+
+---
+
 ## 2026-11-15 | Sprint 3.3.0 — target size | Claude (Opus 5)
 
 Branch `sprint/3.3.0-target-size` off `main`. Second sprint of the public-tool track.
