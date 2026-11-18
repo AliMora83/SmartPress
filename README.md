@@ -28,6 +28,7 @@ Most online compressors send your files to a server. SmartPress doesn't. Every e
 
 - **Images: JPEG, PNG and WebP, in and out.** PNGs are reduced to a 256-colour palette by default, which is where the large savings are, or kept lossless if every pixel matters.
 - **PDFs, without breaking them.** Embedded images are recompressed and text stays selectable and searchable. An optional flatten mode turns each page into an image for the smallest size. Signed PDFs are left untouched, because re-saving would invalidate the signature.
+- **Target size.** Ask for a file under 500 KB, 1 MB or 2 MB and SmartPress encodes it repeatedly to find the best quality that fits. If the target is out of reach it says so and keeps the ordinary result, rather than handing back something degraded that still misses.
 - **Resize and convert in the same pass.** Cap the longest side at 2560, 1920 or 1280 px (never enlarging) and save every image as WebP, or keep each file in its own format.
 - **Three presets instead of a slider.** Min, Medium (the default) or Max, calibrated per format against real fixtures.
 - **Honest results.** If compression saves less than 3%, you get your original file back. PNGs that would be smaller as WebP say so, and convert in one click, singly or in bulk.

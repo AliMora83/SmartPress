@@ -5,6 +5,36 @@
 
 ---
 
+## 2026-11-15 | Sprint 3.3.0 — target size | Claude (Opus 5)
+
+Branch `sprint/3.3.0-target-size` off `main`. Second sprint of the public-tool track.
+
+- **Target size** setting: Off / 500 KB / 1 MB / 2 MB (1024-based, so the labels match `formatSize` in the Result column). Applies to every format.
+- **`lib/codecs/targetSize.ts`** holds the search, in two shapes because the quality axes differ in kind. `searchScale` bisects the calibrated 0-10 scale (JPEG, WebP, PDF images): probe the preset, then the floor — one encode that answers "reachable at all?" instead of a budget spent converging on no — then bisect on a 0.5 grid for the highest quality that fits. `searchLadder` walks the three pngquant presets downward for lossy PNG, because interpolating between `PNG_PRESETS` ranges would invent a number in the one file whose numbers are all measured. Lossless PNG has no quality to trade, so it is measured once against the target, not searched.
+- **Two rules.** The preset is the ceiling: a target can only make a file smaller than asked for, never larger. And an unreachable target returns the ordinary preset result with a row note, not the smallest attempt — a scale-0 encode that still misses 500 KB has spent every bit of quality and still fails the requirement.
+- **Budget:** 4 refinements for images (re-encode from pixels in memory), 2 for PDF (each pass re-parses the document and recompresses every embedded image). Worst case 6 and 4 encodes.
+- **Progress** during a search is attempt-based and forward-only; the per-encode 0-100 would otherwise restart once per attempt and read as a stall.
+
+**Verified against `next build` output (`out/`, headless Chrome, generated fixtures: 4000x3000 JPEG, 800x600 JPEG, alpha PNG, 1-page PDF, 5-page PDF).** Saved bytes read back from the Save all ZIP, not the rounded row label.
+
+| case | result | note |
+|---|---|---|
+| 2.44 MB JPEG, target 500 KB | 504,166 B | under 512,000, within 1.5% of the cap — the bisection refines upward, it does not settle for the floor |
+| 1.96 MB alpha PNG, target 500 KB | 671,486 B | ladder exhausted; Medium result kept, row says so |
+| target 1 MB, everything already under | identical bytes to target Off, 12.4 s vs 12.5 s | one encode, no wasted passes |
+| 3.60 MB 5-page PDF, Min preset, target 2 MB | 1,606,394 B | Min was 2.05 MB; searched down and landed on scale 6, the highest that fits |
+| 3.60 MB 5-page PDF, target 1 MB | 1,606,394 B | floor probe missed, Medium kept, row says so |
+
+**Target Off is byte-identical to 3.2.0** across the four-file batch (798 KB / 21 KB / 656 KB / 316 KB). PDF quality sensitivity confirmed separately (Min 2.05 MB, Medium 1.53 MB, Max 1.34 MB) — the search is moving a real axis.
+
+**Not verified:** the desktop (Tauri) build, Safari, the Chromium folder-picker save path (headless cannot drive the picker; the ZIP fallback was tested). No perceptual metric was run on the chosen quality points — the search optimises bytes against a cap, nothing else. The sandbox cannot reach Google Fonts, so verification builds stubbed `next/font` locally; that stub is not committed.
+
+**Known, logged in the plan:** no custom target value; the WebP nudge and the Convert buttons ignore the target; the settings panel no longer fits the card at the design height.
+
+Version 3.3.0.
+
+---
+
 ## 2026-11-15 | Sprint 3.2.0 — resize, WebP output, UI fixes | Claude (Fable 5.2)
 
 Branch `sprint/3.2.0-resize-output-format` off `main`. First sprint of the public-tool track.

@@ -30,6 +30,12 @@ export interface CompressJob {
     /** Images only: cap the longest side at this many pixels. Never enlarges. */
     maxDimension?: number;
     /**
+     * Search for the largest result at or under this many bytes instead of
+     * encoding once. `options` stays the ceiling: a target only ever makes the
+     * file smaller than the preset asked for.
+     */
+    targetBytes?: number;
+    /**
      * Stage is passed through, not just the number. These encoders expose no
      * progress callback, so a percentage alone crawls and reads as hung; the UI
      * needs to say which stage it is in.
@@ -54,6 +60,13 @@ export interface CompressResult {
     width?: number;
     height?: number;
     resized?: boolean;
+    /**
+     * Target size only: whether `bytes` is at or under the target. False means
+     * the target was out of reach and these are the ordinary preset bytes.
+     */
+    targetMet?: boolean;
+    /** Target size only: how many encodes the search spent. */
+    attempts?: number;
 }
 
 /**
@@ -148,6 +161,8 @@ export class CodecPool {
                     width: msg.width,
                     height: msg.height,
                     resized: msg.resized,
+                    targetMet: msg.targetMet,
+                    attempts: msg.attempts,
                 });
             } else {
                 waiting.reject(new Error(msg.error));
@@ -173,6 +188,7 @@ export class CodecPool {
         const req: WorkerRequest = {
             id: job.id, file: job.file, format: job.format, options: job.options,
             outputFormat: job.outputFormat, maxDimension: job.maxDimension,
+            targetBytes: job.targetBytes,
         };
         slot.worker.postMessage(req);
     }
